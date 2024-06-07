@@ -80,9 +80,495 @@ TIPPOS = {
     "Y0": 0
 }
 
+
+def gsect(f, xmin, xmax, ep, *args):
+    GS = 0.3819660
+    if xmax == xmin or ep == 0:
+        return (xmin + xmax) / 2
+    if xmax < xmin:
+        xmin, xmax = xmax, xmin
+
+    delx = xmax - xmin
+    xa = xmin + delx * GS
+    fa = f(xa, *args)
+    xb = xmax - delx * GS
+    fb = f(xb, *args)
+
+    while delx >= ep:
+        delxsav = delx
+        if fb < fa:
+            xmax = xb
+            delx = xmax - xmin
+            if delx == delxsav:
+                return (xmin + xmax) / 2
+            xb = xa
+            fb = fa
+            xa = xmin + delx * GS
+            fa = f(xa, *args)
+        else:
+            xmin = xa
+            delx = xmax - xmin
+            if delx == delxsav:
+                return (xmin + xmax) / 2
+            xa = xb
+            fa = fb
+            xb = xmax - delx * GS
+            fb = f(xb, *args)
+    return (xmin + xmax) / 2
+
+# # fermi-dirac integral
+
+
+# def fjint(J, ETA, trap_function):
+#     PI = 3.141592654
+#     if ETA > 40:
+#         return np.sqrt(ETA ** (J + 2)) / (J / 2.0 + 1)
+#     if ETA < -8:
+#         result = np.sqrt(PI) * np.exp(max(-40.0, ETA)) / 2.0
+#         if J == 3:
+#             result *= 3.0 / 2.0
+#         return result
+#     return trap_function(fj, 0.0, 20.0 + ETA, 1000)
+
+# # trapezoidal integration routine
+
+
+# def trap(f, XMIN, XMAX, NSTEP):
+#     DELX = (XMAX - XMIN) / float(NSTEP)
+#     SUM = (f(XMIN) + f(XMAX)) / 2.0
+#     if NSTEP >= 2:
+#         for i in range(1, NSTEP):
+#             X = XMIN + i * DELX
+#             SUM += f(X)
+#     return SUM * DELX
+
+
+# def fj(X, J, ETA):
+#     return np.sqrt(X ** J) / (1.0 + np.exp(X - ETA))
+
+# # fermi-dirac occupation factor
+
+
+# def fd(e, ef, tk):
+#     if tk == 0:
+#         if e == ef:
+#             return 0.5
+#         return 1.0 if e < ef else 0.0
+#     ratio = (e - ef) / tk
+#     if ratio > 40:
+#         return 0.0
+#     if ratio < -40:
+#         return 1.0
+#     return 1.0 / (1.0 + np.exp(ratio))
+
+# # electron density in conduction band
+
+
+# def rhocb(IREG, EF, Pot, semi, fjint_function):
+#     C = 6.815e21
+#     if semi["IINV"][IREG] == 2 or semi["IINV"][IREG] == 3:
+#         return 0.0
+#     if semi["TK"] != 0.0:
+#         return C * np.sqrt((semi["ACB"][IREG] * semi["TK"]) ** 3) * fjint_function(1, (EF - semi["EGAP"][IREG] - semi["DELVB"][IREG] - Pot) / semi["TK"])
+#     if (EF - semi["EGAP"][IREG] - semi["DELVB"][IREG] - Pot) <= 0.0:
+#         return 0.0
+#     return (2.0 * C / 3.0) * np.sqrt((semi["ACB"][IREG] * (EF - semi["EGAP"][IREG] - semi["DELVB"][IREG] - Pot)) ** 3)
+
+# # hole density in valence band
+
+
+# def rhovb(IREG, EF, Pot, semi, fjint_function):
+#     C = 6.815e21
+#     if semi["IINV"][IREG] == 1 or semi["IINV"][IREG] == 3:
+#         return 0.0
+#     if semi["TK"] != 0.0:
+#         return C * np.sqrt((semi["AVB"][IREG] * semi["TK"]) ** 3) * fjint_function(1, (-EF + semi["DELVB"][IREG] + Pot) / semi["TK"])
+#     if (-EF + semi["DELVB"][IREG] + Pot) <= 0.0:
+#         return 0.0
+#     return (2.0 * C / 3.0) * np.sqrt((semi["AVB"][IREG] * (-EF + semi["DELVB"][IREG] + Pot)) ** 3)
+
+# # ionized donor density
+
+
+# def rhod(IREG, EF, Pot, semi):
+#     RHOD = semi["CD"][IREG]
+#     if semi["IDEG"][IREG] == 1:
+#         return RHOD
+
+#     EXPO = EF - semi["EGAP"][IREG] - \
+#         semi["DELVB"][IREG] + semi["ED"][IREG] - Pot
+#     if semi["TK"] != 0.0:
+#         EXPO /= semi["TK"]
+#         if EXPO < -40:
+#             return RHOD
+#         if EXPO > 40:
+#             return 0.0
+#         return RHOD / (1.0 + 2.0 * np.exp(EXPO))
+
+#     if EXPO <= 0.0:
+#         return RHOD
+#     return 0.0
+
+# # ionized acceptor density
+
+
+# def rhoa(IREG, EF, Pot, semi):
+#     RHOA = semi["CA"][IREG]
+#     if semi["IDEG"][IREG] == 1:
+#         return RHOA
+
+#     EXPO = semi["EA"][IREG] - EF + semi["DELVB"][IREG] + Pot
+#     if semi["TK"] != 0.0:
+#         EXPO /= semi["TK"]
+#         if EXPO < -40:
+#             return RHOA
+#         if EXPO > 40:
+#             return 0.0
+#         return RHOA / (1.0 + 4.0 * np.exp(EXPO))
+
+#     if EXPO <= 0.0:
+#         return RHOA
+#     return 0.0
+
+# # Total density of bulk charges
+
+
+# def rhob(IREG, EF, Pot, rhocb_function, rhoa_function, rhovb_function, rhod_function, semi, fjint_function):
+#     RHOE = rhocb_function(IREG, EF, Pot, semi, fjint_function) + \
+#         rhoa_function(IREG, EF, Pot, semi)
+#     RHOH = rhovb_function(IREG, EF, Pot, semi, fjint_function) + \
+#         rhod_function(IREG, EF, Pot, semi)
+#     return -RHOE + RHOH
+
+
+# def rhos(IAR, EF1, DELE, rhos1_function, rhos2_function):
+#     return rhos1_function(IAR, EF1, DELE) + rhos2_function(IAR, EF1, DELE)
+
+
+# def arho(EF, IREG, rhob_function, rhocb_function, rhoa_function, rhovb_function, rhod_function, semi, fjint_function):
+#     return abs(rhob_function(IREG, EF, 0, rhocb_function, rhoa_function, rhovb_function, rhod_function, semi, fjint_function))
+
+
+# def enfind(IAR, EN1, EN2, NE, rhos_function):
+#     EN0 = EN1
+#     ESTART = EN1
+#     DELE = abs(EN1 - EN2) / float(NE)
+#     if DELE == 0:
+#         return EN0
+#     if EN2 < EN1:
+#         DELE = -DELE
+
+#     for IE in range(NE + 1):
+#         EF1 = ESTART + IE * DELE
+#         SIGTMP = rhos_function(IAR, EF1, abs(DELE))
+#         if (DELE > 0 and SIGTMP <= 0) or (DELE <= 0 and SIGTMP >= 0):
+#             EN0 = EF1
+#             break
+#     return EN0
+
+def sig(iar, index, e):
+    # Placeholder for the SIG function implementation
+    # This function needs to be implemented based on your requirements
+    return 1.0  # example value
+
+
+def rhos1(iar, ef1, dele, surf):
+    sum_val = 0.0
+    e = surf["EN"][iar, 0]
+
+    if ef1 == surf["EN"][iar, 0]:
+        return sum_val
+
+    if surf["ISTK"] == 0:
+        if ef1 < surf["EN"][iar, 0]:
+            while e < ef1:
+                e += dele
+                sum_val += sig(iar, 0, e) * dele
+        else:
+            while e > ef1:
+                e -= dele
+                sum_val += sig(iar, 0, e) * dele
+        return sum_val
+
+    if ef1 < surf["EN"][iar, 0]:
+        while e < ef1 + 10.0 * surf["TK"]:
+            e += dele
+            sum_val += sig(iar, 0, e) * fd(e, ef1, surf["TK"]) * dele
+    else:
+        while e > ef1 - 10.0 * surf["TK"]:
+            e -= dele
+            sum_val += sig(iar, 0, e) * (1.0 - fd(e, ef1, surf["TK"])) * dele
+
+    return sum_val
+
+
+def rhos2(iar, ef1, dele, surf):
+    sum_val = 0.0
+    e = surf["EN"][iar, 1]
+
+    if ef1 == surf["EN"][iar, 1]:
+        return sum_val
+
+    if surf["ISTK"] == 0:
+        if ef1 < surf["EN"][iar, 1]:
+            while e < ef1:
+                e += dele
+                sum_val += sig(iar, 1, e) * dele
+        else:
+            while e > ef1:
+                e -= dele
+                sum_val += sig(iar, 1, e) * dele
+        return sum_val
+
+    if ef1 < surf["EN"][iar, 1]:
+        while e < ef1 + 10.0 * surf["TK"]:
+            e += dele
+            sum_val += sig(iar, 1, e) * fd(e, ef1, surf["TK"]) * dele
+    else:
+        while e > ef1 - 10.0 * surf["TK"]:
+            e -= dele
+            sum_val += sig(iar, 1, e) * (1.0 - fd(e, ef1, surf["TK"])) * dele
+
+    return sum_val
+
+
+def rhos(iar, ef1, dele, surf):
+    return rhos1(iar, ef1, dele, surf) + rhos2(iar, ef1, dele, surf)
+
+
+def sigsum(iar, ener):
+    return sig(iar, 0, ener) + sig(iar, 1, ener)
+
+
+def enfind(iar, en1, en2, ne, surf):
+    en0 = en1
+    estart = en1
+    dele = abs(en1 - en2) / float(ne)
+    if dele == 0:
+        return en0
+    if en2 < en1:
+        dele = -dele
+
+    for ie in range(ne + 1):
+        ef1 = estart + ie * dele
+        sigtmp = rhos(iar, ef1, abs(dele), surf)
+        if dele > 0 and sigtmp <= 0:
+            en0 = ef1
+            break
+        elif dele < 0 and sigtmp >= 0:
+            en0 = ef1
+            break
+
+    return en0
+
+# # Find Fermi-level
+
+
+# def effind(IREG, semi, arho_function, gsect_function, rhob_function, rhocb_function, rhoa_function, rhovb_function, rhod_function, fjint_function):
+#     IINVSAV = semi["IINV"][IREG]
+#     semi["IINV"][IREG] = 0
+
+#     if semi["CD"][IREG] == 0 and semi["CA"][IREG] == 0:
+#         EF = semi["EGAP"][IREG] / 2 + 0.75 * semi["TK"] * \
+#             np.log(semi["AVB"][IREG] / semi["ACB"][IREG])
+#     elif semi["TK"] == 0:
+#         if semi["CA"][IREG] > semi["CD"][IREG]:
+#             EF = semi["EA"][IREG] / 2
+#         elif semi["CA"][IREG] < semi["CD"][IREG]:
+#             EF = semi["EGAP"][IREG] - semi["ED"][IREG] / 2
+#         else:
+#             EF = (semi["EGAP"][IREG] - semi["ED"][IREG] + semi["EA"][IREG]) / 2
+#     else:
+#         ESTART = -0.1 + semi["DELVB"][IREG]
+#         NE = 1000
+#         DELE = (semi["EGAP"][IREG] + semi["DELVB"][IREG] + 0.2) / float(NE)
+#         RMIN = arho_function(ESTART, IREG, rhob_function, rhocb_function,
+#                              rhoa_function, rhovb_function, rhod_function, semi, fjint_function)
+#         IESAV = 1
+
+#         for IE in range(2, NE + 1):
+#             ENER = ESTART + (IE - 1) * DELE
+#             RTMP = arho_function(ENER, IREG, rhob_function, rhocb_function,
+#                                  rhoa_function, rhovb_function, rhod_function, semi, fjint_function)
+#             if RTMP <= RMIN:
+#                 IESAV = IE
+#                 RMIN = RTMP
+
+#         EFMIN = ESTART + (IESAV - 2) * DELE
+#         EFMAX = ESTART + IESAV * DELE
+#         gsect_function(arho_function, EFMIN, EFMAX, 1.e-6, IREG, rhob_function, rhocb_function,
+#                        rhoa_function, rhovb_function, rhod_function, semi, fjint_function)
+#         EF = (EFMIN + EFMAX) / 2
+
+#     semi["IINV"][IREG] = IINVSAV
+#     return EF
+
+def fjint(J, ETA):
+    PI = 3.141592654
+    if ETA > 40:
+        return np.sqrt(ETA**(J+2)) / (J/2.0 + 1)
+    if ETA < -8:
+        result = np.sqrt(PI) * np.exp(max(-40., ETA)) / 2.0
+        if J == 3:
+            result *= 3.0 / 2.0
+        return result
+
+    def fj(X):
+        return np.sqrt(X**J) / (1.0 + np.exp(X - ETA))
+
+    def trap(F, XMIN, XMAX, NSTEP):
+        DELX = (XMAX - XMIN) / float(NSTEP)
+        SUM = (F(XMIN) + F(XMAX)) / 2.0
+        if NSTEP >= 2:
+            for I in range(1, NSTEP):
+                X = XMIN + I * DELX
+                SUM += F(X)
+        return SUM * DELX
+
+    return trap(fj, 0.0, 20.0 + ETA, 1000)
+
+
+def fd(e, ef, tk):
+    if tk == 0:
+        if e == ef:
+            return 0.5
+        if e < ef:
+            return 1.0
+        return 0.0
+    ratio = (e - ef) / tk
+    if ratio > 40:
+        return 0.0
+    if ratio < -40:
+        return 1.0
+    return 1.0 / (1.0 + np.exp(ratio))
+
+
+def rhocb(IREG, EF, Pot, semi, fjint_function):
+    C = 6.815e21
+    if semi["IINV"][IREG] == 2 or semi["IINV"][IREG] == 3:
+        return 0.0
+    if semi["TK"] != 0.0:
+        return C * np.sqrt((semi["ACB"][IREG] * semi["TK"])**3) * fjint_function(1, (EF - semi["EGAP"][IREG] - semi["DELVB"][IREG] - Pot) / semi["TK"])
+    if (EF - semi["EGAP"][IREG] - semi["DELVB"][IREG] - Pot) <= 0.0:
+        return 0.0
+    return (2.0 * C / 3.0) * np.sqrt((semi["ACB"][IREG] * (EF - semi["EGAP"][IREG] - semi["DELVB"][IREG] - Pot))**3)
+
+
+def rhovb(IREG, EF, Pot, semi, fjint_function):
+    C = 6.815e21
+    if semi["IINV"][IREG] == 1 or semi["IINV"][IREG] == 3:
+        return 0.0
+    if semi["TK"] != 0.0:
+        return C * np.sqrt((semi["AVB"][IREG] * semi["TK"])**3) * fjint_function(1, (-EF + semi["DELVB"][IREG] + Pot) / semi["TK"])
+    if (-EF + semi["DELVB"][IREG] + Pot) <= 0.0:
+        return 0.0
+    return (2.0 * C / 3.0) * np.sqrt((semi["AVB"][IREG] * (-EF + semi["DELVB"][IREG] + Pot))**3)
+
+
+def rhod(IREG, EF, Pot, semi):
+    RHOD = semi["CD"][IREG]
+    if semi["IDEG"][IREG] == 1:
+        return RHOD
+    EXPO = EF - semi["EGAP"][IREG] - \
+        semi["DELVB"][IREG] + semi["ED"][IREG] - Pot
+    if semi["TK"] != 0.0:
+        EXPO /= semi["TK"]
+        if EXPO < -40:
+            return semi["CD"][IREG]
+        if EXPO > 40:
+            return 0.0
+        return semi["CD"][IREG] / (1.0 + 2.0 * np.exp(EXPO))
+    if EXPO <= 0:
+        return semi["CD"][IREG]
+    return 0.0
+
+
+def rhoa(IREG, EF, Pot, semi):
+    RHOA = semi["CA"][IREG]
+    if semi["IDEG"][IREG] == 1:
+        return RHOA
+    EXPO = semi["EA"][IREG] - EF + semi["DELVB"][IREG] + Pot
+    if semi["TK"] != 0.0:
+        EXPO /= semi["TK"]
+        if EXPO < -40:
+            return semi["CA"][IREG]
+        if EXPO > 40:
+            return 0.0
+        return semi["CA"][IREG] / (1.0 + 4.0 * np.exp(EXPO))
+    if EXPO <= 0:
+        return semi["CA"][IREG]
+    return 0.0
+
+
+def rhob(IREG, EF, Pot, rhocb_function, rhoa_function, rhovb_function, rhod_function, semi, fjint_function):
+    RHOE = rhocb_function(IREG, EF, Pot, semi, fjint_function) + \
+        rhoa_function(IREG, EF, Pot, semi)
+    RHOH = rhovb_function(IREG, EF, Pot, semi, fjint_function) + \
+        rhod_function(IREG, EF, Pot, semi)
+    return -RHOE + RHOH
+
+
+def arho(EF, IREG, rhob_function, rhocb_function, rhoa_function, rhovb_function, rhod_function, semi, fjint_function):
+    return abs(rhob_function(IREG, EF, 0, rhocb_function, rhoa_function, rhovb_function, rhod_function, semi, fjint_function))
+
+
+def effind(IREG, semi, arho_function, gsect_function, rhob_function,
+           rhocb_function, rhoa_function, rhovb_function, rhod_function, fjint_function):
+    IINVSAV = semi["IINV"][IREG]
+    semi["IINV"][IREG] = 0
+
+    if semi["CD"][IREG] == 0 and semi["CA"][IREG] == 0:
+        EF = semi["EGAP"][IREG] / 2 + 0.75 * semi["TK"] * \
+            np.log(semi["AVB"][IREG] / semi["ACB"][IREG])
+    elif semi["TK"] == 0:
+        if semi["CA"][IREG] > semi["CD"][IREG]:
+            EF = semi["EA"][IREG] / 2
+        elif semi["CA"][IREG] < semi["CD"][IREG]:
+            EF = semi["EGAP"][IREG] - semi["ED"][IREG] / 2
+        else:
+            EF = (semi["EGAP"][IREG] - semi["ED"][IREG] + semi["EA"][IREG]) / 2
+    else:
+        ESTART = -0.1 + semi["DELVB"][IREG]
+        NE = 1000
+        DELE = (semi["EGAP"][IREG] + semi["DELVB"][IREG] + 0.2) / float(NE)
+        RMIN = arho_function(ESTART, IREG, rhob_function, rhocb_function,
+                             rhoa_function, rhovb_function, rhod_function, semi, fjint_function)
+        IESAV = 1
+
+        for IE in range(2, NE + 1):
+            ENER = ESTART + (IE - 1) * DELE
+            RTMP = arho_function(ENER, IREG, rhob_function, rhocb_function,
+                                 rhoa_function, rhovb_function, rhod_function, semi, fjint_function)
+            if RTMP <= RMIN:
+                IESAV = IE
+                RMIN = RTMP
+
+        EFMIN = ESTART + (IESAV - 2) * DELE
+        EFMAX = ESTART + IESAV * DELE
+        EF_OPT = gsect_function(arho_function, EFMIN, EFMAX, 1.e-6, IREG, rhob_function, rhocb_function,
+                                rhoa_function, rhovb_function, rhod_function, semi, fjint_function)
+        EF = (EFMIN + EFMAX) / 2
+
+    semi["IINV"][IREG] = IINVSAV
+    return EF
+
+
+def semirho(IREG, DELE, ESTART, NE, NEDIM, RHOBTAB, ICOMP, RHOCBTAB, RHOVBTAB, rhocb_function, rhoa_function, rhovb_function, rhod_function, semi, fjint_function):
+    if NE > NEDIM:
+        raise ValueError('*** ERROR - NE > NEDIM; PROGRAM HALTED')
+    for I in range(1, NE + 1):
+        EF1 = (I - 1) * DELE + ESTART
+        RHOCBSAV = rhocb_function(IREG, EF1, 0, semi, fjint_function)
+        RHOVBSAV = rhovb_function(IREG, EF1, 0, semi, fjint_function)
+        RHOBTAB[IREG, I] = -RHOCBSAV - \
+            rhoa_function(IREG, EF1, 0, semi) + RHOVBSAV + \
+            rhod_function(IREG, EF1, 0, semi)
+        if ICOMP == 1:
+            RHOCBTAB[IREG, I] = RHOCBSAV
+            RHOVBTAB[IREG, I] = RHOVBSAV
+
+
 # Function to read fort_new.9 file
-
-
 def read_fort9(filename="fort_new.9"):
     with open(filename, 'r') as file:
         data = file.readlines()
@@ -272,22 +758,6 @@ def read_fort9(filename="fort_new.9"):
 
 
 def process_parameters(parameters):
-    # 初始化 CC 和 SEMI 字典
-    CC = {
-        "CD": np.zeros(NREGDIM),
-        "CA": np.zeros(NREGDIM)
-    }
-    SEMI = {
-        "EGAP": np.zeros(NREGDIM),
-        "DELVB": np.zeros(NREGDIM),
-        "ED": np.zeros(NREGDIM),
-        "EA": np.zeros(NREGDIM),
-        "ACB": np.zeros(NREGDIM),
-        "AVB": np.zeros(NREGDIM),
-        "IDEG": np.zeros(NREGDIM, dtype=int),
-        "IINV": np.zeros(NREGDIM, dtype=int)
-    }
-
     for param in parameters:
         SLOPE = param["SLOPE"]
         SEPIN = param["SEPIN"]
@@ -297,6 +767,24 @@ def process_parameters(parameters):
         X0 = param["X0"]
         Y0 = param["Y0"]
         NREG = param["NREG"]
+
+        CC = {
+            "CD": np.array([region["CD"] for region in param["REGIONS"]]),
+            "CA": np.array([region["CA"] for region in param["REGIONS"]])
+        }
+        SEMI = {
+            "TK": param["TK"],
+            "EGAP": np.array([region["EGAP"] for region in param["REGIONS"]]),
+            "ED": np.array([region["ED"] for region in param["REGIONS"]]),
+            "EA": np.array([region["EA"] for region in param["REGIONS"]]),
+            "ACB": np.array([region["ACB"] for region in param["REGIONS"]]),
+            "AVB": np.array([np.exp(2.0 * np.log(np.sqrt(region["AVBH"]**3) + np.sqrt(region["AVBL"]**3)) / 3.0) for region in param["REGIONS"]]),
+            "IDEG": np.array([region["IDEG"] for region in param["REGIONS"]], dtype=int),
+            "IINV": np.array([region["IINV"] for region in param["REGIONS"]], dtype=int),
+            "DELVB": np.array([region["DELVB"] for region in param["REGIONS"]]),
+            "CD": CC["CD"],
+            "CA": CC["CA"]
+        }
 
         print(
             f"RAD, SLOPE, ANGLE = {RAD}, {SLOPE}, {360.0 * np.arctan(1.0 / SLOPE) / PI}")
@@ -413,9 +901,8 @@ def process_parameters(parameters):
                 EN0[IAR] = SURF["EN"][IAR, 0]
             else:
                 print("SEARCHING FOR CHARGE NEUTRALITY LEVEL")
-                # 呼叫 ENFIND 子程序
-                EN0[IAR] = (SURF["EN"][IAR, 0] + SURF["EN"]
-                            [IAR, 1]) / 2  # 模擬計算
+                EN0[IAR] = enfind(IAR, SURF["EN"][IAR, 0],
+                                  SURF["EN"][IAR, 1], NE, rhos)
 
             print(f"CHARGE-NEUTRALITY LEVEL = {EN0[IAR]}")
 
@@ -438,8 +925,20 @@ def process_parameters(parameters):
         ANEG = param["ANEG"]
         APOS = param["APOS"]
         VSTART = param["VSTART"]
-        DELS1 = param["DELS1"]
-        SEP0 = param["SEP0"]
+        if VSTART < 0:
+            DELS1 = abs(VSTART) * ANEG
+        else:
+            DELS1 = abs(VSTART) * APOS
+        SEP0 = SEPIN - DELS1
+
+        # Find Fermi-level position
+        for ireg in range(NREG):
+            EF = effind(ireg, SEMI, arho, gsect, rhob,
+                        rhocb, rhoa, rhovb, rhod, fjint)
+            print(f"REGION TYPE {ireg + 1}, FERMI-LEVEL = {EF}")
+            RHOCC = rhocb(ireg, EF, 0, SEMI, fjint)
+            RHOVV = rhovb(ireg, EF, 0, SEMI, fjint)
+            print(f"CARRIER DENSITY IN CB, VB = {RHOCC}, {RHOVV}")
 
 
 # Example usage
