@@ -575,31 +575,8 @@ def process_parameters(parameters):  # 主程式
                 print("COMPUTING TABLE OF SURFACE CHARGE DENSITIES")
 
                 # 初始化其他 semitip3 所需的参数
-                NR = NRIN
-                NV = NVIN
-                NS = NSIN
-    
-                if SIZE > 0:
-                    DELR0 = RAD
-                if RAD2 != 0:
-                    DELR0= min(RAD2, DELR)
-                    DELR0 = min(DELR,depletion_width/ NR) * SIZE
-        
-                    DELS0= RAD
-                if RAD2 != 0:
-                    DELS0 = min(RAD2, DELS)
-                    DELS0 = min(DELS,depletion_width/ NS) * SIZE
-                else:
-                    DELR0 = DELRIN
-                    DELS0 = DELSIN
-
-                NP = NPIN
-    
-                if MIRROR == 1:
-                    DELP = pi / float(NP)
-                else:
-                    DELP = 2 * pi / float(NP)
                 
+               
                
                 # 计算ETAT, A, Z0, C
                 

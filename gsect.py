@@ -17,7 +17,8 @@ def gsect(f, xmin, xmax, ep, *args):
             xmax = xb
             delx = xmax - xmin
             if delx == delxsav:
-                return (xmin + xmax) / 2
+                result = (xmin + xmax) / 2
+                return result
             xb = xa
             fb = fa
             xa = xmin + delx * GS
@@ -26,9 +27,12 @@ def gsect(f, xmin, xmax, ep, *args):
             xmin = xa
             delx = xmax - xmin
             if delx == delxsav:
-                return (xmin + xmax) / 2
+                result = (xmin + xmax) / 2
+                return result
             xa = xb
             fa = fb
             xb = xmax - delx * GS
             fb = f(xb, *args)
-    return (xmin + xmax) / 2
+
+    result = (xmin + xmax) / 2
+    return result
