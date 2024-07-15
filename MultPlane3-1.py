@@ -615,12 +615,6 @@ def process_parameters(parameters):  # 主程式
                     iinit, MIRROR, EPSIL
                 )
 
-                # 打印 semitip3 返回的值
-                print(f"ETAT, A, Z0, C = {ETAT}, {A}, {Z0}, {C}")
-                print(f"NR,NS,NV,NP = {NR}, {NS}, {NV}, {NP}")
-                print(f"DELR, DELS, DELV, DELP = {DELR[0]}, {DELS[0]}, {DELV[0]}, {DELP}")
-                print(f"LARGEST RADIUS, DEPTH = {np.max(R)}, {np.max(S)}")
-
 # 調用函數
 parameters = read_fort9("fort_new.9")
 process_parameters(parameters)
