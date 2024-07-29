@@ -1,11 +1,15 @@
 import numpy as np
+import struct
 from gsect import gsect
 from semirhomult import effind, arho, rhob, rhocb, rhovb, rhoa, rhod, fjint, fd
 from surfrhomult import enfind, rhos
 from semitip3 import *
 from potcut3 import *
-from math import atan, sqrt, log, pi, tan, cos, sin,exp
-from surfrho import*
+from math import atan, sqrt, log, pi, tan, cos, sin, exp
+from surfrho import *
+from planecurr import*
+from contr3 import*
+
 # Constants
 EPSIL0 = 8.854185E-12
 E = 1.60210E-19
@@ -40,6 +44,13 @@ AVBH = np.zeros(NREGDIM)
 AVBSO = np.zeros(NREGDIM)
 ESO = np.zeros(NREGDIM)
 TIP = np.zeros((NRDIM, NVDIM, NPDIM), dtype=bool)
+CURR = 0.0
+CURRV = 0.0
+CURRC = 0.0
+DELPHI = 0.0
+PHI0 = 0.0
+IERR = 0
+ACB = np.zeros(NREGDIM)
 
 # Common blocks
 SEMI = {
@@ -225,12 +236,9 @@ def read_fort9(filename="fort_new.9"):
         index += 1
 
         # 檢查下一行是否包含逗號分隔的數值串並處理 NBIAS 和 BBIAS
-
         param["NBIAS"] = int(data[index].strip())
         index += 1
-
         # Read BBIAS values from the next line
-        # change '2.0, 1.9, 1.8 ...' string to list of floats
         param["BBIAS"] = [float(x) for x in data[index].split(',') if x.strip()]
         index += 1
 
@@ -266,9 +274,13 @@ def read_fort9(filename="fort_new.9"):
             param["DELS1"] = abs(param["VSTART"]) * param["APOS"]
         param["SEP0"] = param["SEPIN"] - param["DELS1"]
 
+        # Define NBARR1 based on specific requirements or add to parameter file
+        param["NBARR1"] = 10  # Example initialization, adjust based on actual needs
+
         parameters.append(param)
 
     return parameters
+
 
 # Function to process the parameters and initialize common blocks and arrays
 def compute_depletion_width(CD, CA, PotTIP, EPSIL, EPSIL0, E):
@@ -365,6 +377,7 @@ def process_parameters(parameters):  # 主程式
         X0 = param["X0"]
         Y0 = param["Y0"]
         NREG = param["NREG"]
+        NBARR1 = param["NBARR1"]  # Ensure NBARR1 is initialized
 
         CC = {
             "CD": np.array([region["CD"] for region in param["REGIONS"]]),
@@ -376,15 +389,18 @@ def process_parameters(parameters):  # 主程式
             "ED": np.array([region["ED"] for region in param["REGIONS"]]),
             "EA": np.array([region["EA"] for region in param["REGIONS"]]),
             "ACB": np.array([region["ACB"] for region in param["REGIONS"]]),
-            "AVB": np.array([np.exp(2.0 * np.log(np.sqrt(region["AVBH"]**3) + np.sqrt(region["AVBL"]**3)) / 3.0) for region in param["REGIONS"]]),
+            "AVB": np.array([exp(2.0 * log(sqrt(region["AVBH"]**3) + sqrt(region["AVBL"]**3)) / 3.0) for region in param["REGIONS"]]),
             "IDEG": np.array([region["IDEG"] for region in param["REGIONS"]], dtype=int),
             "IINV": np.array([region["IINV"] for region in param["REGIONS"]], dtype=int),
             "DELVB": np.array([region["DELVB"] for region in param["REGIONS"]]),
             "CD": CC["CD"],
             "CA": CC["CA"]
         }
-
-        print(f"RAD, SLOPE, ANGLE = {RAD}, {SLOPE}, {360.0 * np.arctan(1.0 / SLOPE) / pi}")
+        AVBL = np.array([region["AVBL"] for region in param["REGIONS"]])
+        AVBH = np.array([region["AVBH"] for region in param["REGIONS"]])
+        AVBSO = np.array([region["AVBSO"] for region in param["REGIONS"]])
+        ESO = np.array([region["ESO"] for region in param["REGIONS"]])
+        print(f"RAD, SLOPE, ANGLE = {RAD}, {SLOPE}, {360.0 * atan(1.0 / SLOPE) / pi}")
         print(f"CONTACT POTENTIAL = {CPot}")
         print(f"POSITION OF TIP = {X0}, {Y0}")
         print(f"NUMBER OF DIFFERENT REGIONS OF SEMICONDUCTOR = {NREG}")
@@ -407,11 +423,10 @@ def process_parameters(parameters):  # 主程式
             SEMI["ED"][ireg] = region["ED"]
             SEMI["EA"][ireg] = region["EA"]
             SEMI["ACB"][ireg] = region["ACB"]
-            AVBH = region["AVBH"]
-            AVBL = region["AVBL"]
-            SEMI["AVB"][ireg] = np.exp(2.0 * np.log(np.sqrt(AVBH**3) + np.sqrt(AVBL**3)) / 3.0)
-            AVBSO = region["AVBSO"]
-            ESO = region["ESO"]
+           
+            SEMI["AVB"][ireg] = exp(2.0 * log(sqrt(AVBH**3) + sqrt(AVBL**3)) / 3.0)
+            
+            
             SEMI["IDEG"][ireg] = region["IDEG"]
             SEMI["IINV"][ireg] = region["IINV"]
 
@@ -519,14 +534,14 @@ def process_parameters(parameters):  # 主程式
         NV = param["NVIN"]
         NS = param["NSIN"]
         NP = param["NPIN"]
-        BIAS = param["BBIAS"][0]
+        BIAS = param["BBIAS"][0] if param["NBIAS"] > 0 else 0.0  # Ensure BIAS has a valid default value
         pot0 = 0.0
         ierr = 0
-        iinit = 1
+        IINIT= 1
         DELR = np.zeros(NRDIM)
         DELS = np.zeros(NSDIM)
         DELV = np.zeros(NRDIM)
-        DELP = 2.0 * np.pi / NP  # 计算DELP
+        DELP = 2.0 * pi / NP  # 计算DELP
         R = np.zeros(NRDIM)
         S = np.zeros(NSDIM)
         DELXSI = np.zeros(NRDIM)  # 初始化DELXSI
@@ -534,6 +549,7 @@ def process_parameters(parameters):  # 主程式
         TIP = np.zeros((NRDIM, NVDIM, NPDIM), dtype=bool)
         SEM = np.zeros((2, NRDIM, NSDIM, NPDIM))
         VSINT = np.zeros((2, NRDIM, NPDIM))
+        ETAT,A,Z0,C=0,0,0,0
         if VSTART < 0:
             DELS1 = abs(VSTART) * ANEG
         else:
@@ -550,7 +566,9 @@ def process_parameters(parameters):  # 主程式
             print(f"CARRIER DENSITY IN CB, VB = {RHOCC}, {RHOVV}")
 
         # 计算 BIAS 和 TIP POTENTIAL
-        for ibias in range(NBIAS):
+        print(f"NBIAS: {NBIAS}, BBIAS: {BBIAS}")
+        for ibias in range(min(NBIAS, len(BBIAS))):  # Ensure the loop does not exceed the length of BBIAS
+            print(f"ibias: {ibias}")
             bias0 = BBIAS[ibias]
             if bias0 <= 0:
                 SEP = SEP0 + ANEG * abs(bias0)
@@ -578,43 +596,139 @@ def process_parameters(parameters):  # 主程式
                 NR = NRIN
                 NV = NVIN
                 NS = NSIN
-    
+                
                 if SIZE > 0:
                     DELR0 = RAD
                 if RAD2 != 0:
-                    DELR0= min(RAD2, DELR)
-                    DELR0 = min(DELR,depletion_width/ NR) * SIZE
+                    DELR0 = min(RAD2, DELR)
+                    DELR0 = min(DELR, depletion_width / NR) * SIZE
         
-                    DELS0= RAD
+                DELS0 = RAD
                 if RAD2 != 0:
                     DELS0 = min(RAD2, DELS)
-                    DELS0 = min(DELS,depletion_width/ NS) * SIZE
+                    DELS0 = min(DELS, depletion_width / NS) * SIZE
                 else:
                     DELR0 = DELRIN
                     DELS0 = DELSIN
-
+                
                 NP = NPIN
     
                 if MIRROR == 1:
                     DELP = pi / float(NP)
                 else:
                     DELP = 2 * pi / float(NP)
-                
-               
-                # 计算ETAT, A, Z0, C
-                
-                """
-                SEMITIP3(SEP+RAD2,RAD,SLOPE,ETAT,A,Z0,C,VAC,TIP,SEM,VSINT,
-     &   R,S,DELV,DELR,DELS,DELP,NRDIM,NVDIM,NSDIM,NPDIM,NR,NV,NS,NP,
-     &   PotTIP,IWRIT1,ITMAX,EP,IPMAX,Pot0,IERR,IINIT,MIRROR,EPSIL)
-                """
-                # 调用 semitip3 函数
-                ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, pot0, ierr = semitip3(
-                    SEP+RAD2, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, DELR, DELXSI, DELP, 
-                    NRDIM, NVDIM, NSDIM, NPDIM, NR, NV, NS, NP,BIAS, IWRIT, ITMAX, EP, IPMAX, pot0, ierr, 
-                    iinit, MIRROR, EPSIL
-                )
+        semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, DELR, DELXSI, DELP, 
+             NRDIM, NVDIM, NSDIM, NPDIM, NR, NV, NS, NP, BIAS, IWRIT, ITMAX, EP, IPMAX, pot0, ierr, 
+             IINIT, MIRROR, EPSIL)
+        pot0=0.5
+        print(pot0)
+                # 呼叫 potcut3 函數
+        BARR2, PROF2, NBARR1 = potcut3(0, VAC, TIP, SEM, VSINT, NRDIM, NVDIM, NSDIM, NPDIM, NV, NS, NP, SEP, S, DELV, pot0, BIAS, CHI, CPot, SEMI["EGAP"], BARR, PROF, NBARR1, NVDIM1, NVDIM2, IWRIT)
+        VACSTEP = 0.01
+        nexpan = 1
+        NEXVAC = nexpan
 
+        if IWRIT != 0:
+                print(f'expansion factor for barrier = {nexpan}')
+    
+                NBARR2 = nexpan * 4 * (NBARR1) + 1
+                BARR2 = np.zeros(NBARR2)
+                BARR2[NBARR2 - 1] = BARR[NBARR1 - 1]
+
+                for J in range(NBARR1 - 1, 0, -1):
+                    B2 = BARR[J]
+                    B1 = BARR[J - 1]
+                    for K in range(nexpan - 1, -1, -1):
+                        BARR2[(J - 1) * nexpan + K] = (B2 * K + B1 * (nexpan - K)) / nexpan
+    
+                if IWRIT != 0:
+                    print(f'number of expanded points in vacuum = {NBARR2}')
+                
+        if MIRROR != 1:
+            print('*** SOLUTION FOR CURRENT CAN ONLY BE DONE WITH MIRROR PLANE')
+            return 500
+    
+        ICOMP = 1
+        if ICOMPIN == 0:
+            if BIAS >= 0:
+                ICOMP = 0
+            else:
+                ICOMP = -1
+
+        EGAP1 = SEMI["EGAP"][0]
+        AVBL1 = AVBL[0]
+        AVBH1 = AVBH[0]
+        AVBSO1 = AVBSO[0]
+        ACB1 = ACB[0]
+        ESO1 = ESO[0]
+        
+
+
+        planecurr(SEP, VAC, TIP, SEM, VSINT, R, S, DELV, DELR, DELS, DELP, NRDIM, NVDIM, NSDIM, NPDIM, NR, NV, NS, NP,
+                NXDIM, NXDIM2, NYDIM, NZDIM, PVAC, PSEM, PSURF, VACWID, CHI, EFTIP, EGAP1, AVBL1, AVBH1, AVBSO1, ACB1,
+                ESO1, BIAS, DELPHI, PHI0, TK, EF, EMAX, CURR, CURRV, CURRC, IWRIT, ierr, NBARR2, NVDIM2, BARR2, NEIGENDIM, ZVACDEL, ICOMP)                
+        
+        #內有諸多bug 但也是先等semitip3程式完成debug
+        KPLOT1 = int(np.round((PhiIN / (DELP * 180. / np.pi)) + 0.5))
+        KPLOT1 = min(max(1, KPLOT1), NP)
+        Phi = (KPLOT1 - 0.5) * DELP * 180. / np.pi
+       
+        if MIRROR == 1:
+            KPLOT2 = (NP - KPLOT1 + 1)
+        else:
+            KPLOT2 = (KPLOT1 + NP // 2) % NP + 1
+
+        print('ACTUAL ANGLE OF CROSS-SECTIONAL PLOT =', Phi)
+        print('CORRESPONDING TO ANGULAR GRID LINES ', KPLOT2, KPLOT1)
+
+        with open('output_file.txt', 'w') as f:
+            f.write('ACTUAL ANGLE OF CROSS-SECTIONAL PLOT = {}\n'.format(Phi))
+            f.write('CORRESPONDING TO ANGULAR GRID LINES {} {}\n'.format(KPLOT2, KPLOT1))
+
+        with open('output_data.txt', 'w') as f:
+            for i in range(NR, 0, -1):
+                f.write('{} {}\n'.format(-R[i-1], VSINT[0, i-1, KPLOT2-1]))
+
+            for i in range(1, NR+1):
+                f.write('{} {}\n'.format(R[i-1], VSINT[0, i-1, KPLOT1-1]))
+
+    # Assuming file closure is handled by the context manager
+    ETA1=0
+    if IWRIT >= 2:
+        contr3(ETA1, VAC, TIP, SEM, VSINT, R, S, DELV, NRDIM, NVDIM, NSDIM, NPDIM, NR, NV, NS, NP, NUMC, DELPOT, MIRROR, KPLOT1, KPLOT2)
+    if IWRIT >= 3:
+        NRECL = 40 + 4 * NR * NP * (NV + NS + 1) + 4 * NR * 2 + 4 * NS
+        with open('fort.13', 'wb') as f:
+            # Write the data to file in binary format
+            DATA = [NR, NV, NS, NP, SEP, RAD, RAD2, SLOPE, BIAS, EPSIL]
+            VAC_DATA = VAC.flatten().tolist()
+            SEM_DATA = SEM.flatten().tolist()
+            VSINT_DATA = VSINT.flatten().tolist()
+            R_DATA = R.tolist()
+            S_DATA = S.tolist()
+            DELV_DATA = DELV.tolist()
+
+            # Assuming all data is float, convert to bytes and write
+            DATA_BYTES = struct.pack(f'{len(DATA)}f', *DATA)
+            VAC_BYTES = struct.pack(f'{len(VAC_DATA)}f', *VAC_DATA)
+            SEM_BYTES = struct.pack(f'{len(SEM_DATA)}f', *SEM_DATA)
+            VSINT_BYTES = struct.pack(f'{len(VSINT_DATA)}f', *VSINT_DATA)
+            R_BYTES = struct.pack(f'{len(R_DATA)}f', *R_DATA)
+            S_BYTES = struct.pack(f'{len(S_DATA)}f', *S_DATA)
+            DELV_BYTES = struct.pack(f'{len(DELV_DATA)}f', *DELV_DATA)
+
+            f.write(DATA_BYTES)
+            f.write(VAC_BYTES)
+            f.write(SEM_BYTES)
+            f.write(VSINT_BYTES)
+            f.write(R_BYTES)
+            f.write(S_BYTES)
+            f.write(DELV_BYTES)
+
+    print('PRESS THE ENTER KEY TO EXIT')
+    input()
+    exit()
+    
 # 調用函數
 parameters = read_fort9("fort_new.9")
 process_parameters(parameters)

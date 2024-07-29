@@ -1,4 +1,4 @@
-def pcent(JJ, VAC, SEM, VSINT, NRDIM, NVDIM, NSDIM, NPDIM, NP):
+def PCENT(JJ, VAC, SEM, VSINT, NRDIM, NVDIM, NSDIM, NPDIM, NP):
     J = abs(JJ)
     I = 1
     SUM = 0.0
@@ -14,41 +14,37 @@ def pcent(JJ, VAC, SEM, VSINT, NRDIM, NVDIM, NSDIM, NPDIM, NP):
     return SUM / float(NP)
 
 
-def potcut3(icut, vac, tip, sem, vsint, nrdim, nvdim, nsdim, npdim, nv, ns, np, sep, s, delv, pot0, bias, chi, cpot, egap, barr, prof, nbarr1, nvdim1, nvdim2, iwrit):
-    if icut == 0:
-        pot0 = pcent(0, vac, sem, vsint, nrdim, nvdim, nsdim, npdim, np)
+def potcut3(ICUT, VAC, TIP, SEM, VSINT, NRDIM, NVDIM, NSDIM, NPDIM, NV, NS, NP, SEP, S, DELV, POT0, BIAS, CHI, CPot, EGAP, BARR, PROF, NBARR1, NVDIM1, NVDIM2, IWRIT):
+    if ICUT == 0:
+        POT0 = PCENT(0, VAC, SEM, VSINT, NRDIM, NVDIM, NSDIM, NPDIM, NP)
     else:
-        pot0 = vsint[1, icut, 1]
+        POT0 = VSINT[1, ICUT, 1]
 
-    nbarr1 = 0
-    barr[0] = chi + egap + pot0
+    NBARR1 = 0
+    BARR[0] = CHI + EGAP + POT0
 
-    for j in range(nv):
-        if tip[0, j, 0]:
+    for J in range(NV):
+        if TIP[0, J, 0]:
             break
 
-        if icut == 0:
-            barr[j + 1] = chi + egap + \
-                pcent(j, vac, sem, vsint, nrdim, nvdim, nsdim, npdim, np)
+        if ICUT == 0:
+            BARR[J + 1] = CHI + EGAP + PCENT(J, VAC, SEM, VSINT, NRDIM, NVDIM, NSDIM, NPDIM, NP)
         else:
-            z = sep * j / nv
-            jp = int(z / delv[icut])
-            f = (z - jp * delv[icut]) / delv[icut]
-            if jp == 0:
-                barr[j + 1] = chi + egap + vsint[1, icut, 0] * \
-                    (1. - f) + vac[1, icut, jp + 1, 0] * f
+            Z = SEP * J / NV
+            JP = int(Z / DELV[ICUT])
+            F = (Z - JP * DELV[ICUT]) / DELV[ICUT]
+            if JP == 0:
+                BARR[J + 1] = CHI + EGAP + VSINT[1, ICUT, 0] * (1. - F) + VAC[1, ICUT, JP + 1, 0] * F
             else:
-                barr[j + 1] = chi + egap + vac[1, icut, jp, 0] * \
-                    (1. - f) + vac[1, icut, jp + 1, 0] * f
+                BARR[J + 1] = CHI + EGAP + VAC[1, ICUT, JP, 0] * (1. - F) + VAC[1, ICUT, JP + 1, 0] * F
 
-    barr[j + 1] = chi + egap + (bias + cpot)
-    nbarr1 = j + 1
+    BARR[J + 1] = CHI + EGAP + (BIAS + CPot)
+    NBARR1 = J + 1
 
-    for j in range(ns):
-        if icut == 0:
-            prof[j] = pcent(-j, vac, sem, vsint, nrdim,
-                            nvdim, nsdim, npdim, np)
+    for J in range(NS):
+        if ICUT == 0:
+            PROF[J] = PCENT(-J, VAC, SEM, VSINT, NRDIM, NVDIM, NSDIM, NPDIM, NP)
         else:
-            prof[j] = sem[1, icut, j, 0]
+            PROF[J] = SEM[1, ICUT, J, 0]
 
-    return barr, prof, nbarr1
+    return BARR, PROF, NBARR1
