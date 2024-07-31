@@ -3,7 +3,7 @@ import struct
 from gsect import gsect
 from semirhomult import effind, arho, rhob, rhocb, rhovb, rhoa, rhod, fjint, fd
 from surfrhomult import enfind, rhos
-from semitip3 import *
+from semitip import*
 from potcut3 import *
 from math import atan, sqrt, log, pi, tan, cos, sin, exp
 from surfrho import *
@@ -366,7 +366,7 @@ def compute_bias_and_tip_potential(bias0, BMOD, CPot):
 
     return biases, tip_potentials
 
-def process_parameters(parameters):  # 主程式
+def process_parameters(parameters):
     for param in parameters:
         # 提取和初始化參數
         SLOPE = param["SLOPE"]
@@ -617,11 +617,13 @@ def process_parameters(parameters):  # 主程式
                     DELP = pi / float(NP)
                 else:
                     DELP = 2 * pi / float(NP)
-        semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, DELR, DELXSI, DELP, 
+        print("Before semitip3: pot0 =", pot0)  # Print pot0 before calling semitip3
+        ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, pot0, ierr = semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, DELR, DELXSI, DELP, 
              NRDIM, NVDIM, NSDIM, NPDIM, NR, NV, NS, NP, BIAS, IWRIT, ITMAX, EP, IPMAX, pot0, ierr, 
-             IINIT, MIRROR, EPSIL)
-        pot0=0.5
-        print(pot0)
+             IINIT, MIRROR, EPSIL,DELS)
+        
+        print("After semitip3: pot0 =", pot0)  # Print pot0 after calling semitip3
+        
                 # 呼叫 potcut3 函數
         BARR2, PROF2, NBARR1 = potcut3(0, VAC, TIP, SEM, VSINT, NRDIM, NVDIM, NSDIM, NPDIM, NV, NS, NP, SEP, S, DELV, pot0, BIAS, CHI, CPot, SEMI["EGAP"], BARR, PROF, NBARR1, NVDIM1, NVDIM2, IWRIT)
         VACSTEP = 0.01
@@ -661,9 +663,6 @@ def process_parameters(parameters):  # 主程式
         AVBSO1 = AVBSO[0]
         ACB1 = ACB[0]
         ESO1 = ESO[0]
-        
-
-
         planecurr(SEP, VAC, TIP, SEM, VSINT, R, S, DELV, DELR, DELS, DELP, NRDIM, NVDIM, NSDIM, NPDIM, NR, NV, NS, NP,
                 NXDIM, NXDIM2, NYDIM, NZDIM, PVAC, PSEM, PSURF, VACWID, CHI, EFTIP, EGAP1, AVBL1, AVBH1, AVBSO1, ACB1,
                 ESO1, BIAS, DELPHI, PHI0, TK, EF, EMAX, CURR, CURRV, CURRC, IWRIT, ierr, NBARR2, NVDIM2, BARR2, NEIGENDIM, ZVACDEL, ICOMP)                

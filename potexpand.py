@@ -43,8 +43,9 @@ def potexpand(impot, sep, nv, pot0p, s, ns, nsdim, barr, nbarr1, nvdim1, nvdim2,
             barr2[j] -= 1.15 * lambda_val * (nbarr2 - 1.0)**2 / ((j) * (float(nbarr2) - j))
     if iwrit >= 3:
         for i in range(nbarr2):
+            """
             print(-(i) * sep / float(nbarr2 - 1), barr2[i])
-
+            """
     # Expand the potential profile in semiconductor
     for j in range(ns):
         nexsem[j] = 0
