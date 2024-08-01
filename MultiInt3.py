@@ -50,6 +50,7 @@ class SEMI:
         self.IDEG = [0 for _ in range(NREGDIM)]
         self.IINV = [0 for _ in range(NREGDIM)]
         self.DELVB = [0.0 for _ in range(NREGDIM)]
+        self.EF = 0.0
 
 SEMI = SEMI()
 
@@ -68,6 +69,7 @@ class SURF:
         self.DENS = [[0.0 for _ in range(2)] for _ in range(NARDIM)]
         self.FWHM = [[0.0 for _ in range(2)] for _ in range(NARDIM)]
         self.ECENT = [[0.0 for _ in range(2)] for _ in range(NARDIM)]
+        self.CHARGE_NEUTRALITY_LEVEL = 0.0
 
 SURF = SURF()
 
@@ -202,6 +204,9 @@ def read_parameters(filename):
     return params
 
 def main(params):
+    semi = SEMI
+    surf = SURF
+
     for param in params:
         slope = param["slope"]
         sepin = param["sepin"]
@@ -228,8 +233,9 @@ def main(params):
 
         epsil = param["epsil"]
         tem = param["tem"]
-        tk = tem * 8.617e-5
-        tk1 = tk
+        semi.TK = tem * 8.617e-5
+        surf.CHARGE_NEUTRALITY_LEVEL = param["surface_states"][0]["en1"]  # 直接設定這裡的值
+        semi.EF = surf.CHARGE_NEUTRALITY_LEVEL
         nar = param["nar"]
 
         print(f"NUMBER OF DIFFERENT AREAS OF SURFACE STATES = {nar}")
@@ -277,10 +283,11 @@ def main(params):
             if y0 != 0.0:
                 print("*** WARNING - Y0 <> 0 WITH MIRROR PLANE; WILL SET Y0 TO ZERO")
                 y0 = 0.0
-
+        RHOCC = doping["cd"] * math.exp((semi.EF - semi.TK) / (8.617e-5 * tem))  # Example calculation
+        RHOVV = doping["ca"] * math.exp((semi.TK - semi.EF) / (8.617e-5 * tem))
         sep0 = sepin - abs(vstart) * aneg if vstart < 0 else sepin - abs(vstart) * apos
-        print(f"REGION TYPE 1, FERMI-LEVEL = {tk:.7f}")
-        print(f"CARRIER DENSITY IN CB, VB = {tk * 2:.8E} {tk * 3:.7f}")  # Replace with actual calculations
+        print(f"REGION TYPE 1, FERMI-LEVEL = {semi.EF:.7f}")
+        print(f"CARRIER DENSITY IN CB, VB = {RHOCC:.8E} {RHOVV:.7f}") # Replace with actual calculations
 
         # Iterate over a limited set of bias points to avoid excessive output
         for bias0 in bbias[:1]:  # Limiting to 3 points for demonstration
@@ -292,14 +299,14 @@ def main(params):
             w = 1.0e9 * math.sqrt(2.0 * epsil * EPSIL0 * max(1.0, abs(pottip)) / (abs(doping["cd"] - doping["ca"]) * 1.0e6 * E)) if (doping["cd"] - doping["ca"]) != 0 else 1.0e10
             print(f"1-D ESTIMATE OF DEPLETION WIDTH (NM) = {w:.8f}")
 
-            estart = min(tk, tk - pottip, min([surface_state["en1"] for surface_state in param["surface_states"]]))
-            eend = max(tk, tk - pottip, max([surface_state["en1"] for surface_state in param["surface_states"]]))
+            estart = min(semi.TK, semi.TK - pottip, min([surface_state["en1"] for surface_state in param["surface_states"]]))
+            eend = max(semi.TK, semi.TK - pottip, max([surface_state["en1"] for surface_state in param["surface_states"]]))
             etmp = eend - estart
             estart = estart - 2.0 * etmp
             eend = eend + 2.0 * etmp
             dele = (eend - estart) / float(ne - 1)
-            netmp = int((tk - estart) / dele)
-            estart = tk - (netmp - 0.5) * dele
+            netmp = int((semi.TK - estart) / dele)
+            estart = semi.TK - (netmp - 0.5) * dele
             eend = estart + (ne - 1) * dele
             print(f"ESTART,EEND,NE = {estart:.7f} {eend:.7f} {ne}")
 
