@@ -55,50 +55,41 @@ def calculate_pot0(VAC):
 
 def semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, DELR, DELXSI, DELP, 
              NRDIM, NVDIM, NSDIM, NPDIM, NR, NV, NS, NP, BIAS, IWRIT, ITMAX, EP, IPMAX, pot0, ierr, 
-             iinit, MIRROR, EPSIL):
-    print(BIAS)
-    pi = 4.0 * atan(1.0)
-    IBC = 0  # Boundary condition (0=Dirichlet, 1=von Neumann)
-    ierr = 0
-    IINIT = iinit
-    ETAT = 1.0 / sqrt(1.0 + 1.0 / SLOPE**2)
+             iinit, MIRROR, EPSIL, DELS):
+    pi = np.float64(4.0) * atan(1.0)
+    ETAT = np.float64(1.0) / sqrt(np.float64(1.0) + np.float64(1.0) / SLOPE**2)
     A = RAD * SLOPE**2 / ETAT
     sprime = A * ETAT
     Z0 = SEP - sprime
     C = Z0 / sprime
-    DELETA = ETAT / float(NV)
-    DELR0 = 10
-    DELS0 = 10
-    DELP = 0.19635
-    DELR = np.zeros(NR)
-    DELS = np.zeros(NS)
-    EPSILON = 11.7 * 8.85e-12 
+    DELETA = ETAT / np.float64(NV)
+    DELR0 = np.float64(10.0)
+    DELS0 = np.float64(10.0)
+    EPSILON = EPSIL
+    pot_sav = 0
+    pot_sav2 = 0
+    iter_count = 0  # Initialize the global iteration counter
     
-    if IWRIT != 0:
-        print('ETAT, A, Z0, C =', ETAT, A, Z0, C)
-        print('NR, NS, NV, NP =', NR, NS, NV, NP)
-        print('DELR, DELS, DELV, DELP =', DELR0, DELS0, 0.03125, DELP)
-
     if NR > NRDIM or NV > NVDIM or NS > NSDIM or NP > NPDIM:
         ierr = 1
         return ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, pot0, ierr
 
     for i in range(NR):
-        R[i] = (2 * NR * DELR0 / pi) * tan(pi * (i + 0.5) / (2.0 * NR))
+        R[i] = (np.float64(2.0) * NR * DELR0 / pi) * tan(pi * (i + np.float64(0.5)) / (np.float64(2.0) * NR))
         X2M1 = (R[i] / A)**2
         if i != 0:
             XSISAV = xsi
-        xsi = sqrt(1.0 + X2M1)
+        xsi = sqrt(np.float64(1.0) + X2M1)
         if i == 0:
             DELR[i] = R[i]
-            DELXSI[i] = xsi - 1.0
+            DELXSI[i] = xsi - np.float64(1.0)
         else:
             DELR[i] = R[i] - R[i - 1]
             DELXSI[i] = xsi - XSISAV
-        DELV[i] = (sqrt(A ** 2 + R[i] ** 2) + C * A) * ETAT / float(NV) 
-    
+        DELV[i] = (sqrt(A ** 2 + R[i] ** 2) + C * A) * ETAT / np.float64(NV)
+
     for j in range(NS):
-        S[j] = (2 * NS * DELS0 / pi) *tan(pi * (j + 0.5) / (2.0 * NS))
+        S[j] = (np.float64(2.0) * NS * DELS0 / pi) * tan(pi * (j + np.float64(0.5)) / (np.float64(2.0) * NS))
         if j == 0:
             DELS[j] = S[j]
         else:
@@ -107,18 +98,15 @@ def semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, 
     for j in range(NV - 1):
         eta = j * DELETA
         z = A * eta * (xsi + C)
-        rp = A * sqrt(X2M1 * (1.0 - eta**2))
-        if j == 0:
-            zp = 0.0
-        else:
-            zp = z * (j + 0.5) / float(j)
-        
+        rp = A * sqrt(X2M1 * (np.float64(1.0) - eta**2))
+        zp = np.float64(0.0) if j == 0 else z * (j + np.float64(0.5)) / np.float64(j)
+
         for i in range(NR):
-            if zp <= (A * ETAT * (sqrt(1.0 + rp**2 / ((1.0 - ETAT**2) * A**2)) + C)):
+            if zp <= (A * ETAT * (sqrt(np.float64(1.0) + rp**2 / ((np.float64(1.0) - ETAT**2) * A**2)) + C)):
                 for k in range(NP):
-                    if IINIT == 1:
-                        VAC[0, i, j, k] = 0.0
-                        VAC[1, i, j, k] = 0.0
+                    if iinit == 1:
+                        VAC[0, i, j, k] = np.float64(0.0)
+                        VAC[1, i, j, k] = np.float64(0.0)
                     TIP[i, j, k] = False
             else:
                 for k in range(NP):
@@ -132,32 +120,97 @@ def semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, 
             VAC[1, i, NV - 1, k] = BIAS
             TIP[i, NV - 1, k] = True
 
-    if IINIT == 1:
+    if iinit == 1:
         for i in range(NR):
             for k in range(NP):
-                VSINT[0, i, k] = 0.0
-                VSINT[1, i, k] = 0.0
-        if IINIT == 1:
+                VSINT[0, i, k] = np.float64(0.0)
+                VSINT[1, i, k] = np.float64(0.0)
+        if iinit == 1:
             for i in range(NR):
                 for k in range(NP):
-                    SEM[0, i, j, k] = 0.0
-                    SEM[1, i, j, k] = 0.0
-    
+                    SEM[0, i, j, k] = np.float64(0.0)
+                    SEM[1, i, j, k] = np.float64(0.0)
+
     if not np.any(TIP):
         ierr = 1
         print('*** ERROR - VACUUM GRID SPACING TOO LARGE')
         return ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, pot0, ierr
 
-    if IWRIT != 0:
-        print('LARGEST RADIUS, DEPTH =', R[NR - 1], S[NS - 1])
+    
+    for ip in range(min(IPMAX, len(ITMAX), len(EP))):
+        if IWRIT != 0:
+            print('SOLUTION #', ip + 1)
 
-    if ierr == 1:
-        return ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, pot0, ierr
+        ITM = int(ITMAX[ip])
+        EPI = EP[ip]
 
-    direct_calculate_potentials(VAC, TIP, SEM, VSINT, R, DELR, DELV, DELXSI, S, DELS, BIAS, DELR0, DELS0, DELP, DELETA, A, NR, NV, NS, NP, EPSILON)
+        for iter in range(50):
+            pot0, ierr, iter_count = iter(VAC, TIP, SEM, VSINT, R, DELR, DELV, DELP, DELXSI, S, DELS, BIAS, A, NR, NV, NS, NP, EPI, ITM, pot0, IWRIT, ETAT, C, MIRROR, EPSILON, DELETA, iter_count)
+            if iter % 100 == 0:
+                print(f"ITER, Pot0 = {iter_count}, {pot0:.9f}")
 
-    pot0 = calculate_pot0(VAC)  # Calculate pot0 based on the potentials
-    pot0 = round(pot0, 9)  # Ensure pot0 precision to 9 decimal places
-    return ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, pot0, ierr
+            # Check for convergence every 100 iterations
+            if iter % 100 == 0 and abs(pot0 - pot_sav) < EPI and abs(pot_sav - pot_sav2) < 2 * EPI:
+                break
 
+            if iter_count >= 20:  # 強制在20次迭代後停止
+                print(f"FORCED STOP AFTER {iter_count} ITERATIONS")
+                return ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, pot0, ierr,VAC, SEM,VSINT
+        
+        # Return after first solution
+        if ip == 0:
+            return ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, pot0, ierr,VAC, SEM,VSINT
 
+        if NR * 2 > NRDIM or NV * 2 > NVDIM or NS * 2 > NSDIM or NP * 2 > NPDIM:
+            break
+
+        NR *= 2
+        NS *= 2
+        NV *= 2
+        NP *= 2
+        DELRIN /= np.float64(2.0)
+        DELSIN /= np.float64(2.0)
+        DELETA /= np.float64(2.0)
+        DELP /= np.float64(2.0)
+
+        if IWRIT != 0:
+            print('NR, NS, NV, NP =', NR, NS, NV, NP)
+            print('DELR, DELS, DELV, DELP =', DELRIN, DELSIN, (np.float64(1.0) + C) * A * DELETA, DELP)
+
+    return ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, pot0, ierr, VAC , SEM,  VSINT
+
+def gsect(f, xmin, xmax, ep, *args):
+    GS = np.float64(0.3819660)
+    if xmax == xmin or ep == 0:
+        return (xmin + xmax) / 2
+    if xmax < xmin:
+        xmin, xmax = xmax, xmin
+
+    delx = xmax - xmin
+    xa = xmin + delx * GS
+    fa = f(xa, *args)
+    xb = xmax - delx * GS
+    fb = f(xb, *args)
+
+    while delx >= ep:
+        delxsav = delx
+        if fb < fa:
+            xmax = xb
+            delx = xmax - xmin
+            if delx == delxsav:
+                return (xmin + xmax) / 2
+            xb = xa
+            fb = fa
+            xa = xmin + delx * GS
+            fa = f(xa, *args)
+        else:
+            xmin = xa
+            delx = xmax - xmin
+            if delx == delxsav:
+                return (xmin + xmax) / 2
+            xa = xb
+            fa = fb
+            xb = xmax - delx * GS
+            fb = f(xb, *args)
+
+    return (xmin + xmax) / 2

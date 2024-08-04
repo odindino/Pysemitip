@@ -1,55 +1,62 @@
 import math
-
+import numpy as np
+from semirhomult import effind, arho, rhob, rhocb, rhovb, rhoa, rhod, fjint, fd
+from surfrhomult import enfind, rhos
+from gsect import gsect
+from semitip import*
+from potcut3 import*
+from intcurr import*
 # Constants
 EPSIL0 = 8.854185e-12
 E = 1.60210e-19
-PI = 4.0 * math.atan(1.0)
+pi = 4.0 * math.atan(1.0)
 
 # Parameters
-NRDIM = 512
-NVDIM = 64
-NSDIM = 512
-NPDIM = 64
+NRDIM = int(512)
+NVDIM = int(64)
+NSDIM = int(512)
+NPDIM = int(64)
 NVDIM1 = NVDIM + 1
-NVDIM2 = 2048
-NSDIM2 = 20000
-NEDIM = 50000
-NREGDIM = 2
-NARDIM = 2
+NVDIM2 = int(2048)
+NSDIM2 = int(20000)
+NEDIM = int(50000)
+NREGDIM = int(2)
+NARDIM = int(2)
+NBARR1 = [0]
 
 # Arrays and Variables
-VAC = [[[[0.0 for _ in range(NPDIM)] for _ in range(NVDIM)] for _ in range(NRDIM)] for _ in range(2)]
-SEM = [[[[0.0 for _ in range(NPDIM)] for _ in range(NSDIM)] for _ in range(NRDIM)] for _ in range(2)]
-VSINT = [[[0.0 for _ in range(NPDIM)] for _ in range(NRDIM)] for _ in range(2)]
-R = [0.0 for _ in range(NRDIM)]
-S = [0.0 for _ in range(NSDIM)]
-DELV = [0.0 for _ in range(NRDIM)]
-ITMAX = [10 for _ in range(10)]
-EP = [0.0 for _ in range(10)]
-BBIAS = [1000 for _ in range(1000)]
-NLOC = [0 for _ in range(4)]
-BARR = [0.0 for _ in range(NVDIM1)]
-PROF = [0.0 for _ in range(NSDIM)]
-AVBL = [0.0 for _ in range(NREGDIM)]
-AVBH = [0.0 for _ in range(NREGDIM)]
-AVBSO = [0.0 for _ in range(NREGDIM)]
-ESO = [0.0 for _ in range(NREGDIM)]
-TIP = [[[False for _ in range(NPDIM)] for _ in range(NVDIM)] for _ in range(NRDIM)]
+VAC = np.zeros((2, NRDIM, NVDIM, NPDIM), dtype=np.float64)
+SEM = np.zeros((2, NRDIM, NSDIM, NPDIM), dtype=np.float64)
+VSINT = np.zeros((2, NRDIM, NPDIM), dtype=np.float64)
+R = np.zeros(NRDIM, dtype=np.float64)
+S = np.zeros(NSDIM, dtype=np.float64)
+DELV = np.zeros(NRDIM, dtype=np.float64)
+ITMAX = np.full(10, 10, dtype=np.int32)
+EP = np.zeros(10, dtype=np.float64)
+BBIAS = np.full(1000, 1000, dtype=np.float64)
+NLOC = np.zeros(4, dtype=np.int32)
+BARR = np.zeros(NVDIM1, dtype=np.float64)
+PROF = np.zeros(NSDIM, dtype=np.float64)
+AVBL = np.zeros(NREGDIM, dtype=np.float64)
+AVBH = np.zeros(NREGDIM, dtype=np.float64)
+AVBSO = np.zeros(NREGDIM, dtype=np.float64)
+ESO = np.zeros(NREGDIM, dtype=np.float64)
+TIP = np.zeros((NRDIM, NVDIM, NPDIM), dtype=bool)
 
 # COMMON blocks equivalent
 class SEMI:
     def __init__(self):
         self.TK = 0.0
-        self.EGAP = [0.0 for _ in range(NREGDIM)]
-        self.ED = [0.0 for _ in range(NREGDIM)]
-        self.EA = [0.0 for _ in range(NREGDIM)]
-        self.ACB = [0.0 for _ in range(NREGDIM)]
-        self.AVB = [0.0 for _ in range(NREGDIM)]
-        self.CD = [0.0 for _ in range(NREGDIM)]
-        self.CA = [0.0 for _ in range(NREGDIM)]
-        self.IDEG = [0 for _ in range(NREGDIM)]
-        self.IINV = [0 for _ in range(NREGDIM)]
-        self.DELVB = [0.0 for _ in range(NREGDIM)]
+        self.EGAP = np.zeros(NREGDIM, dtype=np.float64)
+        self.ED = np.zeros(NREGDIM, dtype=np.float64)
+        self.EA = np.zeros(NREGDIM, dtype=np.float64)
+        self.ACB = np.zeros(NREGDIM, dtype=np.float64)
+        self.AVB = np.zeros(NREGDIM, dtype=np.float64)
+        self.CD = np.zeros(NREGDIM, dtype=np.float64)
+        self.CA = np.zeros(NREGDIM, dtype=np.float64)
+        self.IDEG = np.zeros(NREGDIM, dtype=np.int32)
+        self.IINV = np.zeros(NREGDIM, dtype=np.int32)
+        self.DELVB = np.zeros(NREGDIM, dtype=np.float64)
         self.EF = 0.0
 
 SEMI = SEMI()
@@ -64,11 +71,11 @@ class SURF:
     def __init__(self):
         self.ISTK = 0
         self.TK1 = 0.0
-        self.EN0 = [0.0 for _ in range(NARDIM)]
-        self.EN = [[0.0 for _ in range(2)] for _ in range(NARDIM)]
-        self.DENS = [[0.0 for _ in range(2)] for _ in range(NARDIM)]
-        self.FWHM = [[0.0 for _ in range(2)] for _ in range(NARDIM)]
-        self.ECENT = [[0.0 for _ in range(2)] for _ in range(NARDIM)]
+        self.EN0 = np.zeros(NARDIM, dtype=np.float64)
+        self.EN = np.zeros((NARDIM, 2), dtype=np.float64)
+        self.DENS = np.zeros((NARDIM, 2), dtype=np.float64)
+        self.FWHM = np.zeros((NARDIM, 2), dtype=np.float64)
+        self.ECENT = np.zeros((NARDIM, 2), dtype=np.float64)
         self.CHARGE_NEUTRALITY_LEVEL = 0.0
 
 SURF = SURF()
@@ -79,8 +86,8 @@ class CD:
         self.ESTART = 0.0
         self.DELE = 0.0
         self.NE = 0
-        self.RHOBTAB = [[0.0 for _ in range(NEDIM)] for _ in range(NREGDIM)]
-        self.RHOSTAB = [[0.0 for _ in range(NEDIM)] for _ in range(NARDIM)]
+        self.RHOBTAB = np.zeros((NREGDIM, NEDIM), dtype=np.float64)
+        self.RHOSTAB = np.zeros((NARDIM, NEDIM), dtype=np.float64)
 
 CD = CD()
 
@@ -111,90 +118,95 @@ def read_parameters(filename):
                 idx += 1
                 continue
             if idx == 0:
-                NPARM = int(lines[idx].split(',')[0])
+                try:
+                    NPARM = int(lines[idx].split(',')[0])
+                except ValueError:
+                    print(f"Error parsing NPARM at line {idx}: {lines[idx]}")
+                    break
                 idx += 1
             else:
                 try:
                     param_set = {
-                        "slope": float(lines[idx].split(',')[0]),
-                        "sepin": float(lines[idx+1].split(',')[0]),
-                        "rad": float(lines[idx+2].split(',')[0]),
-                        "rad2": float(lines[idx+3].split(',')[0]),
-                        "cpot": float(lines[idx+4].split(',')[0]),
-                        "x0": float(lines[idx+5].split(',')[0]),
-                        "y0": float(lines[idx+6].split(',')[0]),
-                        "nreg": int(lines[idx+7].split(',')[0]),
-                        "doping": []
+                        "SLOPE": float(lines[idx].split(',')[0]),
+                        "SEPIN": float(lines[idx+1].split(',')[0]),
+                        "RAD": float(lines[idx+2].split(',')[0]),
+                        "RAD2": float(lines[idx+3].split(',')[0]),
+                        "CPOT": float(lines[idx+4].split(',')[0]),
+                        "X0": float(lines[idx+5].split(',')[0]),
+                        "Y0": float(lines[idx+6].split(',')[0]),
+                        "NREG": int(lines[idx+7].split(',')[0]),
+                        "DOPING": []
                     }
                     idx += 8
-                    for _ in range(param_set["nreg"]):
+                    for _ in range(param_set["NREG"]):
                         doping_set = {
-                            "cd": float(lines[idx].split(',')[0]),
-                            "ca": float(lines[idx+1].split(',')[0]),
-                            "egap": float(lines[idx+2].split(',')[0]),
-                            "delvb": float(lines[idx+3].split(',')[0]),
-                            "ed": float(lines[idx+4].split(',')[0]),
-                            "ea": float(lines[idx+5].split(',')[0]),
-                            "acb": float(lines[idx+6].split(',')[0]),
-                            "avbh": float(lines[idx+7].split(',')[0]),
-                            "avbl": float(lines[idx+8].split(',')[0]),
-                            "avb": math.exp(2.0 * math.log(math.sqrt(float(lines[idx+7].split(',')[0])**3) + math.sqrt(float(lines[idx+8].split(',')[0])**3)) / 3.0),
-                            "avbso": float(lines[idx+9].split(',')[0]),
-                            "eso": float(lines[idx+10].split(',')[0]),
-                            "ideg": int(lines[idx+11].split(',')[0]),
-                            "iinv": int(lines[idx+12].split(',')[0])
+                            "CD": float(lines[idx].split(',')[0]),
+                            "CA": float(lines[idx+1].split(',')[0]),
+                            "EGAP": float(lines[idx+2].split(',')[0]),
+                            "DELVB": float(lines[idx+3].split(',')[0]),
+                            "ED": float(lines[idx+4].split(',')[0]),
+                            "EA": float(lines[idx+5].split(',')[0]),
+                            "ACB": float(lines[idx+6].split(',')[0]),
+                            "AVBH": float(lines[idx+7].split(',')[0]),
+                            "AVBL": float(lines[idx+8].split(',')[0]),
+                            "AVB": math.exp(2.0 * math.log(math.sqrt(float(lines[idx+7].split(',')[0])**3) + math.sqrt(float(lines[idx+8].split(',')[0])**3)) / 3.0),
+                            "AVBSO": float(lines[idx+9].split(',')[0]),
+                            "ESO": float(lines[idx+10].split(',')[0]),
+                            "IDEG": int(lines[idx+11].split(',')[0]),
+                            "IINV": int(lines[idx+12].split(',')[0])
                         }
-                        param_set["doping"].append(doping_set)
+                        param_set["DOPING"].append(doping_set)
                         idx += 13
                     param_set.update({
-                        "epsil": float(lines[idx].split(',')[0]),
-                        "tem": float(lines[idx+1].split(',')[0]),
-                        "nar": int(lines[idx+2].split(',')[0]),
-                        "surface_states": []
+                        "EPSIL": float(lines[idx].split(',')[0]),
+                        "TEM": float(lines[idx+1].split(',')[0]),
+                        "NAR": int(lines[idx+2].split(',')[0]),
+                        "SURFACE_STATES": []
                     })
                     idx += 3
-                    for _ in range(param_set["nar"]):
+                    for _ in range(param_set["NAR"]):
                         surface_state_set = {
-                            "dens1": float(lines[idx].split(',')[0]),
-                            "en1": float(lines[idx+1].split(',')[0]),
-                            "fwhm1": float(lines[idx+2].split(',')[0]),
-                            "ecent1": float(lines[idx+3].split(',')[0]),
-                            "dens2": float(lines[idx+4].split(',')[0]),
-                            "en2": float(lines[idx+5].split(',')[0]),
-                            "fwhm2": float(lines[idx+6].split(',')[0]),
-                            "ecent2": float(lines[idx+7].split(',')[0])
+                            "DENS1": float(lines[idx].split(',')[0]),
+                            "EN1": float(lines[idx+1].split(',')[0]),
+                            "FWHM1": float(lines[idx+2].split(',')[0]),
+                            "ECENT1": float(lines[idx+3].split(',')[0]),
+                            "DENS2": float(lines[idx+4].split(',')[0]),
+                            "EN2": float(lines[idx+5].split(',')[0]),
+                            "FWHM2": float(lines[idx+6].split(',')[0]),
+                            "ECENT2": float(lines[idx+7].split(',')[0])
                         }
-                        param_set["surface_states"].append(surface_state_set)
+                        param_set["SURFACE_STATES"].append(surface_state_set)
                         idx += 8
                     param_set.update({
-                        "istk": int(lines[idx].split(',')[0]),
-                        "mirror": int(lines[idx+1].split(',')[0]),
-                        "nr": int(lines[idx+2].split(',')[0]),
-                        "nv": int(lines[idx+3].split(',')[0]),
-                        "ns": int(lines[idx+4].split(',')[0]),
-                        "np": int(lines[idx+5].split(',')[0]),
-                        "size": float(lines[idx+6].split(',')[0]),
-                        "ipmax": int(lines[idx+7].split(',')[0]),
-                        "itmax": [int(x) for x in lines[idx+8].split(',') if is_number(x.strip())],
-                        "ep": [float(x) for x in lines[idx+9].split(',') if is_number(x.strip())],
-                        "ne": int(lines[idx+10].split(',')[0]),
-                        "iwrite": int(lines[idx+11].split(',')[0]),
-                        "nbias": int(lines[idx+12].split(',')[0]),
-                        "bbias": [float(x) for x in lines[idx+13].split(',') if is_number(x.strip())],
-                        "numc": int(lines[idx+14].split(',')[0]),
-                        "delpot": float(lines[idx+15].split(',')[0]),
-                        "phiin": float(lines[idx+16].split(',')[0]),
-                        "chi": float(lines[idx+17].split(',')[0]),
-                        "eftip": float(lines[idx+18].split(',')[0]),
-                        "nwk": int(lines[idx+19].split(',')[0]),
-                        "nee": int(lines[idx+20].split(',')[0]),
-                        "expani": int(lines[idx+21].split(',')[0]),
-                        "fracz": float(lines[idx+22].split(',')[0]),
-                        "bmod": float(lines[idx+23].split(',')[0]),
-                        "aneg": float(lines[idx+24].split(',')[0]),
-                        "apos": float(lines[idx+25].split(',')[0]),
-                        "vstart": float(lines[idx+26].split(',')[0])
+                        "ISTK": int(float(lines[idx].split(',')[0])),  # Handle ISTK properly
+                        "MIRROR": int(float(lines[idx+1].split(',')[0])),  # Handle MIRROR properly
+                        "NR": int(float(lines[idx+2].split(',')[0])),  # Handle NR properly
+                        "NV": int(float(lines[idx+3].split(',')[0])),  # Handle NV properly
+                        "NS": int(float(lines[idx+4].split(',')[0])),  # Handle NS properly
+                        "NP": int(float(lines[idx+5].split(',')[0])),  # Handle NP properly
+                        "SIZE": float(lines[idx+6].split(',')[0]),
+                        "IPMAX": int(float(lines[idx+7].split(',')[0])),  # Handle IPMAX properly
+                        "ITMAX": [int(x) for x in lines[idx+8].split(',') if is_number(x.strip())],
+                        "EP": [float(x) for x in lines[idx+9].split(',') if is_number(x.strip())],
+                        "NE": int(float(lines[idx+10].split(',')[0])),  # Handle NE properly
+                        "IWRIT": int(float(lines[idx+11].split(',')[0])),  # Handle IWRIT properly
+                        "NBIAS": int(float(lines[idx+12].split(',')[0])),  # Handle NBIAS properly
+                        "BBIAS": [float(x) for x in lines[idx+13].split(',') if is_number(x.strip())],
+                        "NUMC": int(float(lines[idx+14].split(',')[0])),  # Handle NUMC properly
+                        "DELPOT": float(lines[idx+15].split(',')[0]),
+                        "PHIIN": float(lines[idx+16].split(',')[0]),
+                        "CHI": float(lines[idx+17].split(',')[0]),
+                        "EFTIP": float(lines[idx+18].split(',')[0]),
+                        "NWK": int(float(lines[idx+19].split(',')[0])),  # Handle NWK properly
+                        "NEE": int(float(lines[idx+20].split(',')[0])),  # Handle NEE properly
+                        "EXPANI": int(float(lines[idx+21].split(',')[0])),  # Handle EXPANI properly
+                        "FRACZ": float(lines[idx+22].split(',')[0]),
+                        "BMOD": float(lines[idx+23].split(',')[0]),
+                        "ANEG": float(lines[idx+24].split(',')[0]),
+                        "APOS": float(lines[idx+25].split(',')[0]),
+                        "VSTART": float(lines[idx+26].split(',')[0])
                     })
+                    
                     params.append(param_set)
                     idx += 27
                 except Exception as e:
@@ -207,116 +219,278 @@ def main(params):
     semi = SEMI
     surf = SURF
 
+    # Initialize CSAV and related variables
+    CSAV = 0.0
+    CSAVE = 0.0
+    CSAVL = 0.0
+    CSAVV = 0.0
+    CSAVVE = 0.0
+    CSAVVL = 0.0
+    CSAVC = 0.0
+    CSAVCE = 0.0
+    CSAVCL = 0.0
+    CSAV = 0.0
+    CSAVE = 0.0
+    CSAVL = 0.0
+    CSAVV = 0.0
+    CSAVVE = 0.0
+    CSAVVL = 0.0
+    CSAVC = 0.0
+    CSAVCE = 0.0
+    CSAVCL = 0.0
+
+    # Initialize current-related variables
+    CURRV = 0.0
+    CURRV0 = 0.0
+    CURRC = 0.0
+    CURRC0 = 0.0
+    CURR = 0.0
+    CURR0 = 0.0
+    CURRVE = 0.0
+    CURRVL = 0.0
+    CURRCE = 0.0
+    CURRCL = 0.0
+    CURRE = 0.0
+    CURRL = 0.0
+    icomp=1
     for param in params:
-        slope = param["slope"]
-        sepin = param["sepin"]
-        rad = param["rad"]
-        rad2 = param["rad2"]
-        cpot = param["cpot"]
-        x0 = param["x0"]
-        y0 = param["y0"]
-        nreg = param["nreg"]
+        SLOPE = param["SLOPE"]
+        SEPIN = param["SEPIN"]
+        RAD = param["RAD"]
+        RAD2 = param["RAD2"]
+        CPOT = param["CPOT"]
+        X0 = param["X0"]
+        Y0 = param["Y0"]
+        NREG = param["NREG"]
 
         # Print semiconductor and tip parameters
-        print(f"RAD, SLOPE, ANGLE = {rad:.8f} {slope:.8f} {360.0 * math.atan(1.0 / slope) / PI:.6f}")
-        print(f"CONTACT POTENTIAL = {cpot:.7f}")
-        print(f"POSITION OF TIP = {x0:.7f} {y0:.7f}")
-        print(f"NUMBER OF DIFFERENT REGIONS OF SEMICONDUCTOR = {nreg}")
+        print(f"RAD, SLOPE, ANGLE = {RAD:.8f} {SLOPE:.8f} {360.0 * math.atan(1.0 / SLOPE) /pi:.6f}")
+        print(f"CONTACT POTENTIAL = {CPOT:.7f}")
+        print(f"POSITION OF TIP = {X0:.7f} {Y0:.7f}")
+        print(f"NUMBER OF DIFFERENT REGIONS OF SEMICONDUCTOR = {NREG}")
 
-        if nreg > NREGDIM:
+        if NREG > NREGDIM:
             raise ValueError("INPUT NUMBER OF REGIONS > NUMBER OF REGIONS IN PARAMETER STATEMENT")
 
-        for i, doping in enumerate(param["doping"]):
+        for i, doping in enumerate(param["DOPING"]):
             print(f"REGION # {i + 1}")
-            print(f"DOPING = {doping['cd']:.8E} {doping['ca']:.7f}")
-            print(f"BAND GAP, VB OFFSET = {doping['egap']:.7f} {doping['delvb']:.7f}")
+            print(f"DOPING = {doping['CD']:.8E} {doping['CA']:.7f}")
+            print(f"BAND GAP, VB OFFSET = {doping['EGAP']:.7f} {doping['DELVB']:.7f}")
 
-        epsil = param["epsil"]
-        tem = param["tem"]
-        semi.TK = tem * 8.617e-5
-        surf.CHARGE_NEUTRALITY_LEVEL = param["surface_states"][0]["en1"]  # 直接設定這裡的值
+        EPSIL = param["EPSIL"]
+        TEM = param["TEM"]
+        semi.TK = TEM * 8.617e-5
+        surf.CHARGE_NEUTRALITY_LEVEL = param["SURFACE_STATES"][0]["EN1"]
         semi.EF = surf.CHARGE_NEUTRALITY_LEVEL
-        nar = param["nar"]
+        NAR = param["NAR"]
 
-        print(f"NUMBER OF DIFFERENT AREAS OF SURFACE STATES = {nar}")
-        if nar > NARDIM:
+        print(f"NUMBER OF DIFFERENT AREAS OF SURFACE STATES = {NAR}")
+        if NAR > NARDIM:
             raise ValueError("INPUT NUMBER OF AREAS > NUMBER OF AREAS IN PARAMETER STATEMENT")
 
-        for i, surface_state in enumerate(param["surface_states"]):
+        for i, surface_state in enumerate(param["SURFACE_STATES"]):
             print("FIRST DISTRIBUTION OF SURFACE STATES:")
-            print(f"SURFACE STATE DENSITY, EN = {surface_state['dens1']:.8E} {surface_state['en1']:.8f}")
-            print(f"FWHM, ECENT = {surface_state['fwhm1']:.8f} {surface_state['ecent1']:.7f}")
+            print(f"SURFACE STATE DENSITY, EN = {surface_state['DENS1']:.8E} {surface_state['EN1']:.8f}")
+            print(f"FWHM, ECENT = {surface_state['FWHM1']:.8f} {surface_state['ECENT1']:.7f}")
             print("SECOND DISTRIBUTION OF SURFACE STATES:")
-            print(f"SURFACE STATE DENSITY, EN = {surface_state['dens2']:.7f} {surface_state['en2']:.7f}")
-            print(f"FWHM, ECENT = {surface_state['fwhm2']:.7f} {surface_state['ecent2']:.7f}")
+            print(f"SURFACE STATE DENSITY, EN = {surface_state['DENS2']:.7f} {surface_state['EN2']:.7f}")
+            print(f"FWHM, ECENT = {surface_state['FWHM2']:.7f} {surface_state['ECENT2']:.7f}")
 
-        istk = param["istk"]
-        mirror = param["mirror"]
-        nr = param["nr"]
-        nv = param["nv"]
-        ns = param["ns"]
-        np = param["np"]
-        size = param["size"]
-        ipmax = param["ipmax"]
-        itmax = param["itmax"]
-        ep = param["ep"]
-        ne = param["ne"]
-        iwrite = param["iwrite"]
-        nbias = param["nbias"]
-        bbias = param["bbias"]
-        numc = param["numc"]
-        delpot = param["delpot"]
-        phiin = param["phiin"]
-        chi = param["chi"]
-        eftip = param["eftip"]
-        nwk = param["nwk"]
-        nee = param["nee"]
-        expani = param["expani"]
-        fracz = param["fracz"]
-        bmod = param["bmod"]
-        aneg = param["aneg"]
-        apos = param["apos"]
-        vstart = param["vstart"]
-
-        if mirror == 1:
+        ISTK = param["ISTK"]
+        MIRROR = param["MIRROR"]
+        NR = param["NR"]
+        NV = param["NV"]
+        NS = param["NS"]
+        NP = param["NP"]
+        SIZE = param["SIZE"]
+        IPMAX = param["IPMAX"]
+        ITMAX = param["ITMAX"]
+        EP = param["EP"]
+        NE = param["NE"]
+        IWRIT = param["IWRIT"]
+        NBIAS = param["NBIAS"]
+        BBIAS = param["BBIAS"]
+        NUMC = param["NUMC"]
+        DELPOT = param["DELPOT"]
+        PHIIN = param["PHIIN"]
+        CHI = param["CHI"]
+        EFTIP = param["EFTIP"]
+        NWK = param["NWK"]
+        NEE = param["NEE"]
+        EXPANI = param["EXPANI"]
+        FRACZ = param["FRACZ"]
+        BMOD = param["BMOD"]
+        ANEG = param["ANEG"]
+        APOS = param["APOS"]
+        VSTART = param["VSTART"]
+        DELRIN = param.get("DELRIN", 1.0)  # 设置默认值
+        DELSIN = param.get("DELSIN", 1.0)
+        DELXSI = np.zeros(NRDIM)
+        IINIT = 1
+        DELV = np.zeros(NRDIM)
+        DELR = np.zeros(NRDIM)
+        DELS = np.zeros(NSDIM)
+        DELP = 2.0 * pi / NP  # 计算DELP
+        VAC = np.zeros((2, NRDIM, NVDIM, NPDIM), dtype=np.float64)
+        SEM = np.zeros((2, NRDIM, NSDIM, NPDIM), dtype=np.float64)
+        VSINT = np.zeros((2, NRDIM, NPDIM), dtype=np.float64)
+        TIP = np.zeros((NRDIM, NVDIM, NPDIM), dtype=bool)
+        BARR = np.zeros(NVDIM1, dtype=np.float64)
+        PROF = np.zeros(NSDIM, dtype=np.float64)
+        NBARR1 = [0]
+        if MIRROR == 1:
             print("HORIZONTAL MIRROR PLANE ASSUMED")
-            if y0 != 0.0:
+            if Y0 != 0.0:
                 print("*** WARNING - Y0 <> 0 WITH MIRROR PLANE; WILL SET Y0 TO ZERO")
-                y0 = 0.0
-        RHOCC = doping["cd"] * math.exp((semi.EF - semi.TK) / (8.617e-5 * tem))  # Example calculation
-        RHOVV = doping["ca"] * math.exp((semi.TK - semi.EF) / (8.617e-5 * tem))
-        sep0 = sepin - abs(vstart) * aneg if vstart < 0 else sepin - abs(vstart) * apos
+                Y0 = 0.0
+        for ireg in range(NREG):
+            EF = effind(ireg, semi, arho, gsect, rhob, rhocb, rhoa, rhovb, rhod, fjint)
+            param["EF"] = EF  # 将计算得到的EF值添加到参数字典中
+            print(f"REGION TYPE {ireg + 1}, FERMI-LEVEL = {EF}")
+            RHOCC = rhocb(ireg, EF, 0, semi, fjint)
+            RHOVV = rhovb(ireg, EF, 0, semi, fjint)
+            print(f"CARRIER DENSITY IN CB, VB = {RHOCC}, {RHOVV}")
+        RHOCC = doping["CD"] * math.exp((semi.EF - semi.TK) / (8.617e-5 * TEM))  # Example calculation
+        RHOVV = doping["CA"] * math.exp((semi.TK - semi.EF) / (8.617e-5 * TEM))
+        SEP0 = SEPIN - abs(VSTART) * ANEG if VSTART < 0 else SEPIN - abs(VSTART) * APOS
         print(f"REGION TYPE 1, FERMI-LEVEL = {semi.EF:.7f}")
-        print(f"CARRIER DENSITY IN CB, VB = {RHOCC:.8E} {RHOVV:.7f}") # Replace with actual calculations
+        print(f"CARRIER DENSITY IN CB, VB = {RHOCC:.8E} {RHOVV:.7f}")  # Replace with actual calculations
 
         # Iterate over a limited set of bias points to avoid excessive output
-        for bias0 in bbias[:1]:  # Limiting to 3 points for demonstration
-            sep = sep0 + aneg * abs(bias0) if bias0 <= 0 else sep0 + apos * abs(bias0)
-            print(f"SEPARATION = {sep:.8f}")
-            bias = bias0 + (-1 if bmod == 0 else 1) * bmod * math.sqrt(2.0)
-            pottip = bias + cpot
-            print(f"BIAS, TIP POTENTIAL = {bias:.8f} {pottip:.8f}")
-            w = 1.0e9 * math.sqrt(2.0 * epsil * EPSIL0 * max(1.0, abs(pottip)) / (abs(doping["cd"] - doping["ca"]) * 1.0e6 * E)) if (doping["cd"] - doping["ca"]) != 0 else 1.0e10
-            print(f"1-D ESTIMATE OF DEPLETION WIDTH (NM) = {w:.8f}")
+        for BIAS0 in BBIAS[:1]:  # Limiting to 3 points for demonstration
+            SEP = SEP0 + ANEG * abs(BIAS0) if BIAS0 <= 0 else SEP0 + APOS * abs(BIAS0)
+            print(f"SEPARATION = {SEP:.8f}")
+            BIAS = BIAS0 + (-1 if BMOD == 0 else 1) * BMOD * math.sqrt(2.0)
+            POTTIP = BIAS + CPOT
+            print(f"BIAS, TIP POTENTIAL = {BIAS:.8f} {POTTIP:.8f}")
+            W = 1.0e9 * math.sqrt(2.0 * EPSIL * EPSIL0 * max(1.0, abs(POTTIP)) / (abs(doping["CD"] - doping["CA"]) * 1.0e6 * E)) if (doping["CD"] - doping["CA"]) != 0 else 1.0e10
+            print(f"1-D ESTIMATE OF DEPLETION WIDTH (NM) = {W:.8f}")
 
-            estart = min(semi.TK, semi.TK - pottip, min([surface_state["en1"] for surface_state in param["surface_states"]]))
-            eend = max(semi.TK, semi.TK - pottip, max([surface_state["en1"] for surface_state in param["surface_states"]]))
-            etmp = eend - estart
-            estart = estart - 2.0 * etmp
-            eend = eend + 2.0 * etmp
-            dele = (eend - estart) / float(ne - 1)
-            netmp = int((semi.TK - estart) / dele)
-            estart = semi.TK - (netmp - 0.5) * dele
-            eend = estart + (ne - 1) * dele
-            print(f"ESTART,EEND,NE = {estart:.7f} {eend:.7f} {ne}")
+            ESTART = min(semi.TK, semi.TK - POTTIP, min([surface_state["EN1"] for surface_state in param["SURFACE_STATES"]]))
+            EEND = max(semi.TK, semi.TK - POTTIP, max([surface_state["EN1"] for surface_state in param["SURFACE_STATES"]]))
+            ETMP = EEND - ESTART
+            ESTART = ESTART - 2.0 * ETMP
+            EEND = EEND + 2.0 * ETMP
+            DELE = (EEND - ESTART) / float(NE - 1)
+            NETMP = int((semi.TK - ESTART) / DELE)
+            ESTART = semi.TK - (NETMP - 0.5) * DELE
+            EEND = ESTART + (NE - 1) * DELE
+            print(f"ESTART,EEND,NE = {ESTART:.7f} {EEND:.7f} {NE}")
 
             # Placeholder for calls to SEMIRHO and SURFRHO
             print("COMPUTING TABLE OF BULK CHARGE DENSITIES")
             print("COMPUTING TABLE OF SURFACE CHARGE DENSITIES")
 
-        # Placeholder for call to SEMITIP3
-        print(f"CALL SEMITIP3 with parameters: SEP={sep+rad2:.8f}, RAD={rad:.8f}, SLOPE={slope:.8f}, etc.")
+            # Call SEMITIP3
+            POT0 = 0.0  # Initialize POT0
+            IERR = 0  # Initialize IERR
+            """
+            ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, POT0, IERR, VAC, SEM, VSINT = semitip3(
+                SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, DELR, DELXSI, DELP,
+                NRDIM, NVDIM, NSDIM, NPDIM, NR, NV, NS, NP, BIAS, IWRIT, ITMAX, EP, IPMAX, POT0, IERR,
+                IINIT, MIRROR, EPSIL, DELS)
+            """
+            print("COMPUTATION OF CURRENT:")
+            
+            # Get a cut from the potential
+            BARR, PROF, NBARR1=potcut3(0, VAC, TIP, SEM, VSINT, NRDIM, NVDIM, NSDIM, NPDIM, NV, NS, NP, SEP+RAD2, S, DELV, POT0, BIAS, CHI, CPOT, param["DOPING"][0]["EGAP"], BARR, PROF, NBARR1, NVDIM1, NVDIM2, 0)
+            """
+            if IWRIT >= 1:
+                with open("output.txt", "w") as file:
+                    for j in range(NBARR1[0], 0, -1):
+                        file.write(f"{-(j - 1) * DELV[0]:.4f}, {BARR[j]:.4f}\n")
+                    for j in range(1, NS + 1):
+                        file.write(f"{S[j-1]:.4f}, {PROF[j-1]:.4f}\n")
+            """
+            #輸出檔案先暫時跳過 待POSTER後處理
+            NSP = int(round(FRACZ * NS))
+            sdepth = (2 * NS * DELS[0] / pi) * math.tan(pi * NSP / (2. * NS))  # Selecting the first element of DELS
+            print(f"# GRID POINTS INTO SEMICONDUCTOR USED FOR INTEGRATION = {NSP}")
+            print(f"DEPTH INTO SEMICONDUCTOR USED FOR INTEGRATION = {sdepth:.4f}")
+            IWRIT1 = IWRIT % 5
+
+            CURRVE, CURRV0, CURRC, CURRC0, CURR, CURR0 = intcurr(
+                0, BARR, PROF, NBARR1, NV, NS, NSP, NVDIM, NSDIM, S, SEP, BIAS, semi.EF, CHI, EFTIP,
+                CPOT, semi.EGAP[0], semi.TK, AVBH[0], AVBL[0], AVBSO[0], semi.ACB[0], ESO[0], 0, 0,
+                0, 0, 0, NVDIM1, NVDIM2, NSDIM2, EXPANI, NLOC, CURRVE, 0, CURRC, 0, CURR, 0,
+                IWRIT, 0, 0, 0, 0, 0, 0, 0
+            )
+          
+            CURR = CURRE + CURRL
+            CURRV = CURRVE + CURRVL
+            CURRC = CURRCE + CURRCL
+
+            if semi.IINV[0] in [1, 3] and CURRVE > 0:
+                CURRVE = 0.0
+                print('VB EXTENDED INVERSION CURRENT SET TO ZERO')
+
+            if semi.IINV[0] in [1, 3] and CURRVL > 0:
+                CURRVL = 0.0
+                print('VB LOCALIZED INVERSION CURRENT SET TO ZERO')
+
+            print('valence band current ext,loc =', CURRVE, CURRVL)
+
+            if semi.IINV[0] in [2, 3] and CURRCE < 0:
+                CURRCE = 0.0
+                print('CB EXTENDED INVERSION CURRENT SET TO ZERO')
+
+            if semi.IINV[0] in [2, 3] and CURRCL < 0:
+                CURRCL = 0.0
+                print('CB LOCALIZED INVERSION CURRENT SET TO ZERO')
+
+            print('conduction band current ext,loc =', CURRCE, CURRCL)
+
+            CURR = CURRE + CURRL
+            CURRV = CURRVE + CURRVL
+            CURRC = CURRCE + CURRCL
+
+            # Output current and conductance
+            if BMOD == -1:
+                CSAV = CURR
+                CSAVE = CURRE
+                CSAVL = CURRL
+                CSAVV = CURRV
+                CSAVVE = CURRVE
+                CSAVVL = CURRVL
+                CSAVC = CURRC
+                CSAVCE = CURRCE
+                CSAVCL = CURRCL
+            else:
+                COND = (CURR - CSAV)
+                CONDE = (CURRE - CSAVE)
+                CONDL = (CURRL - CSAVL)
+                CONDV = (CURRV - CSAVV)
+                CONDVE = (CURRVE - CSAVVE)
+                CONDVL = (CURRVL - CSAVVL)
+                CONDC = (CURRC - CSAVC)
+                CONDCE = (CURRCE - CSAVCE)
+                CONDCL = (CURRCL - CSAVCL)
+                COND = COND * math.exp(2.0 * 10.0 * (SEP - SEP0 - DELS[0])) / (2.0 * BMOD * math.sqrt(2.0))
+                CONDE = CONDE * math.exp(2.0 * 10.0 * (SEP - SEP0 - DELS[0])) / (2.0 * BMOD * math.sqrt(2.0))
+                CONDL = CONDL * math.exp(2.0 * 10.0 * (SEP - SEP0 - DELS[0])) / (2.0 * BMOD * math.sqrt(2.0))
+                CONDV = CONDV * math.exp(2.0 * 10.0 * (SEP - SEP0 - DELS[0])) / (2.0 * BMOD * math.sqrt(2.0))
+                CONDVE = CONDVE * math.exp(2.0 * 10.0 * (SEP - SEP0 - DELS[0])) / (2.0 * BMOD * math.sqrt(2.0))
+                CONDVL = CONDVL * math.exp(2.0 * 10.0 * (SEP - SEP0 - DELS[0])) / (2.0 * BMOD * math.sqrt(2.0))
+                CONDC = CONDC * math.exp(2.0 * 10.0 * (SEP - SEP0 - DELS[0])) / (2.0 * BMOD * math.sqrt(2.0))
+                CONDCE = CONDCE * math.exp(2.0 * 10.0 * (SEP - SEP0 - DELS[0])) / (2.0 * BMOD * math.sqrt(2.0))
+                CONDCL = CONDCL * math.exp(2.0 * 10.0 * (SEP - SEP0 - DELS[0])) / (2.0 * BMOD * math.sqrt(2.0))
+                print(f"bias0: {BIAS0}, COND: {COND}, CONDE: {CONDE}, CONDL: {CONDL}")
+                print(f"bias0: {BIAS0}, CONDV: {CONDV}, CONDVE: {CONDVE}, CONDVL: {CONDVL}")
+                print(f"bias0: {BIAS0}, CONDC: {CONDC}, CONDCE: {CONDCE}, CONDCL: {CONDCL}")
+
+            CURR = CURR * math.exp(2.0 * 10.0 * (SEP - SEP0 - DELS[0]))
+            CURRE = CURRE * math.exp(2.0 * 10.0 * (SEP - SEP0 - DELS[0]))
+            CURRL = CURRL * math.exp(2.0 * 10.0 * (SEP - SEP0 - DELS[0]))
+            CURRV = CURRV * math.exp(2.0 * 10.0 * (SEP - SEP0 - DELS[0]))
+            CURRVE = CURRVE * math.exp(2.0 * 10.0 * (SEP - SEP0 - DELS[0]))
+            CURRVL = CURRVL * math.exp(2.0 * 10.0 * (SEP - SEP0 - DELS[0]))
+            CURRC = CURRC * math.exp(2.0 * 10.0 * (SEP - SEP0 - DELS[0]))
+            CURRCE = CURRCE * math.exp(2.0 * 10.0 * (SEP - SEP0 - DELS[0]))
+            CURRCL = CURRCL * math.exp(2.0 * 10.0 * (SEP - SEP0 - DELS[0]))
+            print(f"bias: {BIAS}, CURR: {CURR}, CURRE: {CURRE}, CURRL: {CURRL}")
+            print(f"bias: {BIAS}, CURRV: {CURRV}, CURRVE: {CURRVE}, CURRVL: {CURRVL}")
+            print(f"bias: {BIAS}, CURRC: {CURRC}, CURRCE: {CURRCE}, CURRCL: {CURRCL}")
 
 if __name__ == "__main__":
-    params = read_parameters("fort_new.9Int")
+    params = read_parameters("fort_new.9")
     main(params)

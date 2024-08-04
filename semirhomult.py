@@ -1,6 +1,5 @@
 import numpy as np
 
-
 def fjint(J, ETA):
     PI = 3.141592654
     if ETA > 40:
@@ -43,58 +42,58 @@ def fd(e, ef, tk):
 
 def rhocb(IREG, EF, Pot, semi, fjint_function):
     C = 6.815e21
-    if semi["IINV"][IREG] == 2 or semi["IINV"][IREG] == 3:
+    if semi.IINV[IREG] == 2 or semi.IINV[IREG] == 3:
         return 0.0
-    if semi["TK"] != 0.0:
-        return C * np.sqrt((semi["ACB"][IREG] * semi["TK"])**3) * fjint_function(1, (EF - semi["EGAP"][IREG] - semi["DELVB"][IREG] - Pot) / semi["TK"])
-    if (EF - semi["EGAP"][IREG] - semi["DELVB"][IREG] - Pot) <= 0.0:
+    if semi.TK != 0.0:
+        return C * np.sqrt((semi.ACB[IREG] * semi.TK)**3) * fjint_function(1, (EF - semi.EGAP[IREG] - semi.DELVB[IREG] - Pot) / semi.TK)
+    if (EF - semi.EGAP[IREG] - semi.DELVB[IREG] - Pot) <= 0.0:
         return 0.0
-    return (2.0 * C / 3.0) * np.sqrt((semi["ACB"][IREG] * (EF - semi["EGAP"][IREG] - semi["DELVB"][IREG] - Pot))**3)
+    return (2.0 * C / 3.0) * np.sqrt((semi.ACB[IREG] * (EF - semi.EGAP[IREG] - semi.DELVB[IREG] - Pot))**3)
 
 
 def rhovb(IREG, EF, Pot, semi, fjint_function):
     C = 6.815e21
-    if semi["IINV"][IREG] == 1 or semi["IINV"][IREG] == 3:
+    if semi.IINV[IREG] == 1 or semi.IINV[IREG] == 3:
         return 0.0
-    if semi["TK"] != 0.0:
-        return C * np.sqrt((semi["AVB"][IREG] * semi["TK"])**3) * fjint_function(1, (-EF + semi["DELVB"][IREG] + Pot) / semi["TK"])
-    if (-EF + semi["DELVB"][IREG] + Pot) <= 0.0:
+    if semi.TK != 0.0:
+        return C * np.sqrt((semi.AVB[IREG] * semi.TK)**3) * fjint_function(1, (-EF + semi.DELVB[IREG] + Pot) / semi.TK)
+    if (-EF + semi.DELVB[IREG] + Pot) <= 0.0:
         return 0.0
-    return (2.0 * C / 3.0) * np.sqrt((semi["AVB"][IREG] * (-EF + semi["DELVB"][IREG] + Pot))**3)
+    return (2.0 * C / 3.0) * np.sqrt((semi.AVB[IREG] * (-EF + semi.DELVB[IREG] + Pot))**3)
 
 
 def rhod(IREG, EF, Pot, semi):
-    RHOD = semi["CD"][IREG]
-    if semi["IDEG"][IREG] == 1:
+    RHOD = semi.CD[IREG]
+    if semi.IDEG[IREG] == 1:
         return RHOD
-    EXPO = EF - semi["EGAP"][IREG] - \
-        semi["DELVB"][IREG] + semi["ED"][IREG] - Pot
-    if semi["TK"] != 0.0:
-        EXPO /= semi["TK"]
+    EXPO = EF - semi.EGAP[IREG] - \
+        semi.DELVB[IREG] + semi.ED[IREG] - Pot
+    if semi.TK != 0.0:
+        EXPO /= semi.TK
         if EXPO < -40:
-            return semi["CD"][IREG]
+            return semi.CD[IREG]
         if EXPO > 40:
             return 0.0
-        return semi["CD"][IREG] / (1.0 + 2.0 * np.exp(EXPO))
+        return semi.CD[IREG] / (1.0 + 2.0 * np.exp(EXPO))
     if EXPO <= 0:
-        return semi["CD"][IREG]
+        return semi.CD[IREG]
     return 0.0
 
 
 def rhoa(IREG, EF, Pot, semi):
-    RHOA = semi["CA"][IREG]
-    if semi["IDEG"][IREG] == 1:
+    RHOA = semi.CA[IREG]
+    if semi.IDEG[IREG] == 1:
         return RHOA
-    EXPO = semi["EA"][IREG] - EF + semi["DELVB"][IREG] + Pot
-    if semi["TK"] != 0.0:
-        EXPO /= semi["TK"]
+    EXPO = semi.EA[IREG] - EF + semi.DELVB[IREG] + Pot
+    if semi.TK != 0.0:
+        EXPO /= semi.TK
         if EXPO < -40:
-            return semi["CA"][IREG]
+            return semi.CA[IREG]
         if EXPO > 40:
             return 0.0
-        return semi["CA"][IREG] / (1.0 + 4.0 * np.exp(EXPO))
+        return semi.CA[IREG] / (1.0 + 4.0 * np.exp(EXPO))
     if EXPO <= 0:
-        return semi["CA"][IREG]
+        return semi.CA[IREG]
     return 0.0
 
 
@@ -112,23 +111,25 @@ def arho(EF, IREG, rhob_function, rhocb_function, rhoa_function, rhovb_function,
 
 def effind(IREG, semi, arho_function, gsect_function, rhob_function,
            rhocb_function, rhoa_function, rhovb_function, rhod_function, fjint_function):
-    IINVSAV = semi["IINV"][IREG]
-    semi["IINV"][IREG] = 0
+    IINVSAV = semi.IINV[IREG]
+    semi.IINV[IREG] = 0
 
-    if semi["CD"][IREG] == 0 and semi["CA"][IREG] == 0:
-        EF = semi["EGAP"][IREG] / 2 + 0.75 * semi["TK"] * \
-            np.log(semi["AVB"][IREG] / semi["ACB"][IREG])
-    elif semi["TK"] == 0:
-        if semi["CA"][IREG] > semi["CD"][IREG]:
-            EF = semi["EA"][IREG] / 2
-        elif semi["CA"][IREG] < semi["CD"][IREG]:
-            EF = semi["EGAP"][IREG] - semi["ED"][IREG] / 2
+    if semi.CD[IREG] == 0 and semi.CA[IREG] == 0:
+        if semi.ACB[IREG] == 0:  # Avoid division by zero
+            semi.ACB[IREG] = 1e-20  # Set a very small non-zero value
+        EF = semi.EGAP[IREG] / 2 + 0.75 * semi.TK * \
+            np.log(semi.AVB[IREG] / semi.ACB[IREG])
+    elif semi.TK == 0:
+        if semi.CA[IREG] > semi.CD[IREG]:
+            EF = semi.EA[IREG] / 2
+        elif semi.CA[IREG] < semi.CD[IREG]:
+            EF = semi.EGAP[IREG] - semi.ED[IREG] / 2
         else:
-            EF = (semi["EGAP"][IREG] - semi["ED"][IREG] + semi["EA"][IREG]) / 2
+            EF = (semi.EGAP[IREG] - semi.ED[IREG] + semi.EA[IREG]) / 2
     else:
-        ESTART = -0.1 + semi["DELVB"][IREG]
+        ESTART = -0.1 + semi.DELVB[IREG]
         NE = 1000
-        DELE = (semi["EGAP"][IREG] + semi["DELVB"][IREG] + 0.2) / float(NE)
+        DELE = (semi.EGAP[IREG] + semi.DELVB[IREG] + 0.2) / float(NE)
         RMIN = arho_function(ESTART, IREG, rhob_function, rhocb_function,
                              rhoa_function, rhovb_function, rhod_function, semi, fjint_function)
         IESAV = 1
@@ -147,7 +148,7 @@ def effind(IREG, semi, arho_function, gsect_function, rhob_function,
                                 rhoa_function, rhovb_function, rhod_function, semi, fjint_function)
         EF = (EFMIN + EFMAX) / 2
 
-    semi["IINV"][IREG] = IINVSAV
+    semi.IINV[IREG] = IINVSAV
     return EF
 
 
@@ -164,3 +165,5 @@ def semirho(IREG, DELE, ESTART, NE, NEDIM, RHOBTAB, ICOMP, RHOCBTAB, RHOVBTAB, r
         if ICOMP == 1:
             RHOCBTAB[IREG, I] = RHOCBSAV
             RHOVBTAB[IREG, I] = RHOVBSAV
+
+# Your main function and other parts of the code remain unchanged
