@@ -115,10 +115,10 @@ def effind(IREG, semi, arho_function, gsect_function, rhob_function,
     semi.IINV[IREG] = 0
 
     if semi.CD[IREG] == 0 and semi.CA[IREG] == 0:
-        if semi.ACB[IREG] == 0:  # Avoid division by zero
-            semi.ACB[IREG] = 1e-20  # Set a very small non-zero value
+        if semi.ACB[IREG] == 0:  # 避免除以零
+            semi.ACB[IREG] = 0.0635  # 設置一個非常小的非零值
         EF = semi.EGAP[IREG] / 2 + 0.75 * semi.TK * \
-            np.log(semi.AVB[IREG] / semi.ACB[IREG])
+            np.log(max(semi.AVB[IREG] / semi.ACB[IREG], 1e-20))  # 防止 log(0)
     elif semi.TK == 0:
         if semi.CA[IREG] > semi.CD[IREG]:
             EF = semi.EA[IREG] / 2

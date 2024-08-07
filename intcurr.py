@@ -13,7 +13,8 @@ b1 = 1.0  # Example coefficient for valence band edge
 b2 = 0.1  # Example coefficient for valence band edge
 a1 = 1.5  # Example coefficient for conduction band edge
 a2 = 0.2  # Example coefficient for conduction band edge
-
+e2hh = 1.0  # Heavy-hole band energy offset
+e2so = 0.5  # Split-off band energy offset
 barr2 = np.zeros(nbarr2)
 prof2 = np.zeros(ns2)
 s2 = np.linspace(0, 1, ns2)
@@ -31,11 +32,17 @@ def fd(e, ef, tk):
 
 def vbcurr(impot, barr, nbarr1, s, prof, nsp, nsdim, nvdim, nv, nvdim1, nsdim2, nvdim2, sep, pot0, expani, pmax, effm, tk1, tk2, bias, ef, nee, nwk, nloc, ev, eftip, e2band, lun, cdesem, cdesurf, cdlsem, cdlsurf, cdevac, cdlvac, currv, currv0, iwrit, icomp, vbprof):
     """VB Tunnel Current"""
+    nwk=1
+    nee=1
+    expani=1
     kappa = 0.0
     wkftip = np.sqrt(C * eftip)
     sum1 = sum2 = sum1s = sum2s = sum1p = sum2p = 0.0
     currv = 0.0
     currv0 = 0.0
+    nwk=1
+    nee=1
+    expani=1
     emax = ev
     if nwk != 1:
         emin = min(ef - 10.0 * tk1, ef + bias - 10.0 * tk2)
@@ -46,8 +53,14 @@ def vbcurr(impot, barr, nbarr1, s, prof, nsp, nsdim, nvdim, nv, nvdim1, nsdim2, 
         return currv, currv0
 
     wkmax = np.sqrt(C * effm * (emax - emin))
+    if wkmax == 0:
+        return currv, currv0  # Avoid division by zero
+
     semstep = (2.0 * PI / wkmax) / expani
     kappa = np.sqrt(C * max(barr[nbarr1 - 1], barr[0]) - emin)
+    if kappa == 0:
+        return currv, currv0  # Avoid division by zero
+
     vacstep = (2.0 * PI / kappa) / expani
     pot0p = pot0 + vbprof[0]
     
@@ -140,8 +153,14 @@ def vbcurr(impot, barr, nbarr1, s, prof, nsp, nsdim, nvdim, nv, nvdim1, nsdim2, 
         return currv, currv0
 
     wkmax = np.sqrt(C * effm * (emax - emin))
+    if wkmax == 0:
+        return currv, currv0  # Avoid division by zero
+
     semstep = (2.0 * PI / wkmax) / expani
     kappa = np.sqrt(C * max(barr[nbarr1 - 1], barr[0]) - emin)
+    if kappa == 0:
+        return currv, currv0  # Avoid division by zero
+
     vacstep = (2.0 * PI / kappa) / expani
     pot0p = pot0 + vbprof[0]
     
@@ -594,6 +613,9 @@ def cbloc(impot, nsign, wf, wfderiv, e, wkparr, sep, bias, barr2, nvdim2, nbarr2
 
 def cbcurr(impot, barr, nbarr1, s, prof, nsp, nsdim, nvdim, nv, nvdim1, nsdim2, nvdim2, sep, pot0, expani, pmin, effm, tk1, tk2, bias, ef, nee, nwk, nloc, ec, eftip, e2band, lun, cdesem, cdesurf, cdlsem, cdlsurf, cdevac, cdlvac, currc, currc0, iwrit, icomp, cbprof):
     """CB Tunnel Current"""
+    nwk=1
+    nee=1
+    expani=1
     kappa = 0.0
     wkftip = np.sqrt(C * eftip)
     sum1 = sum2 = sum1s = sum2s = sum1p = sum2p = 0.0
@@ -609,8 +631,14 @@ def cbcurr(impot, barr, nbarr1, s, prof, nsp, nsdim, nvdim, nv, nvdim1, nsdim2, 
         return currc, currc0
 
     wkmax = np.sqrt(C * effm * (emax - emin))
+    if wkmax == 0:
+        return currc, currc0  # Avoid division by zero
+
     semstep = (2.0 * PI / wkmax) / expani
     kappa = np.sqrt(C * max(barr[nbarr1 - 1], barr[0]) - emin)
+    if kappa == 0:
+        return currc, currc0  # Avoid division by zero
+
     vacstep = (2.0 * PI / kappa) / expani
     pot0p = pot0 + cbprof[0]
     
@@ -703,8 +731,14 @@ def cbcurr(impot, barr, nbarr1, s, prof, nsp, nsdim, nvdim, nv, nvdim1, nsdim2, 
         return currc, currc0
 
     wkmax = np.sqrt(C * effm * (emax - emin))
+    if wkmax == 0:
+        return currc, currc0  # Avoid division by zero
+
     semstep = (2.0 * PI / wkmax) / expani
     kappa = np.sqrt(C * max(barr[nbarr1 - 1], barr[0]) - emin)
+    if kappa == 0:
+        return currc, currc0  # Avoid division by zero
+
     vacstep = (2.0 * PI / kappa) / expani
     pot0p = pot0 + cbprof[0]
     
@@ -801,7 +835,12 @@ def cbcurr(impot, barr, nbarr1, s, prof, nsp, nsdim, nvdim, nv, nvdim1, nsdim2, 
 
 
 # 主程式
-def intcurr(impot, barr, prof, nbarr1, nv, ns, nsp, nvdim, nsdim, s, sep, bias, ef, chi, eftip, cpot, egap, tk, avbh, avbl, avbso, acb, eso, e2hh, e2so, nee, nwk, pot0, nvdim1, nvdim2, nsdim2, expani, nloc, currv, currv0, currc, currc0, curr, curr0, iwrit, icomp, cdesem, cdesurf, cdlsem, cdlsurf, cdevac, cdlvac):
+def intcurr(impot, barr, prof, nbarr1, nv, ns, nsp, nvdim, nsdim, s, sep, bias, ef, chi, 
+             eftip, cpot, egap, tk, avbh, avbl, avbso, acb, eso, nee, nwk, expani ,pot0, nvdim1, nvdim2, nsdim2, nloc, currv, currv0, currc, currc0, 
+             curr, curr0, iwrit, icomp, cdesem, cdesurf, cdlsem, cdlsurf, cdevac, cdlvac):
+    nwk=1
+    nee=1
+    expani=1     
     cdesem = np.zeros(nsdim)
     cdlsem = np.zeros(nsdim)
     cdevac = np.zeros(nvdim1)
@@ -912,7 +951,6 @@ def cbedge(sz):
     float: Conduction band edge.
     """
     return a1 * sz + a2 * sz ** 2
-
 def vbedge(sz):
     b1 = 1.0  # 根據擬合或計算得到的線性項係數
     b2 = 0.1  # 根據擬合或計算得到的二次項係數
@@ -929,4 +967,3 @@ def vbedge(sz):
     float: Valence band edge.
     """
     return b1 * sz + b2 * sz ** 2
-

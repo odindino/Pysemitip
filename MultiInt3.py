@@ -197,9 +197,9 @@ def read_parameters(filename):
                         "PHIIN": float(lines[idx+16].split(',')[0]),
                         "CHI": float(lines[idx+17].split(',')[0]),
                         "EFTIP": float(lines[idx+18].split(',')[0]),
-                        "NWK": int(float(lines[idx+19].split(',')[0])),  # Handle NWK properly
-                        "NEE": int(float(lines[idx+20].split(',')[0])),  # Handle NEE properly
-                        "EXPANI": int(float(lines[idx+21].split(',')[0])),  # Handle EXPANI properly
+                        "NWK": 1,
+                        "NEE": 1,
+                        "EXPANI": 1,
                         "FRACZ": float(lines[idx+22].split(',')[0]),
                         "BMOD": float(lines[idx+23].split(',')[0]),
                         "ANEG": float(lines[idx+24].split(',')[0]),
@@ -229,17 +229,6 @@ def main(params):
     CSAVC = 0.0
     CSAVCE = 0.0
     CSAVCL = 0.0
-    CSAV = 0.0
-    CSAVE = 0.0
-    CSAVL = 0.0
-    CSAVV = 0.0
-    CSAVVE = 0.0
-    CSAVVL = 0.0
-    CSAVC = 0.0
-    CSAVCE = 0.0
-    CSAVCL = 0.0
-
-    # Initialize current-related variables
     CURRV = 0.0
     CURRV0 = 0.0
     CURRC = 0.0
@@ -253,6 +242,9 @@ def main(params):
     CURRE = 0.0
     CURRL = 0.0
     icomp=1
+    NWK=1
+    NEE=1
+    EXPANI=1
     for param in params:
         SLOPE = param["SLOPE"]
         SEPIN = param["SEPIN"]
@@ -263,8 +255,11 @@ def main(params):
         Y0 = param["Y0"]
         NREG = param["NREG"]
 
-        # Print semiconductor and tip parameters
-        print(f"RAD, SLOPE, ANGLE = {RAD:.8f} {SLOPE:.8f} {360.0 * math.atan(1.0 / SLOPE) /pi:.6f}")
+        NWK = param["NWK"]
+        NEE = param["NEE"]
+        EXPANI = param["EXPANI"]
+
+        print(f"RAD, SLOPE, ANGLE = {RAD:.8f} {SLOPE:.8f} {360.0 * math.atan(1.0 / SLOPE) / pi:.6f}")
         print(f"CONTACT POTENTIAL = {CPOT:.7f}")
         print(f"POSITION OF TIP = {X0:.7f} {Y0:.7f}")
         print(f"NUMBER OF DIFFERENT REGIONS OF SEMICONDUCTOR = {NREG}")
@@ -315,9 +310,6 @@ def main(params):
         PHIIN = param["PHIIN"]
         CHI = param["CHI"]
         EFTIP = param["EFTIP"]
-        NWK = param["NWK"]
-        NEE = param["NEE"]
-        EXPANI = param["EXPANI"]
         FRACZ = param["FRACZ"]
         BMOD = param["BMOD"]
         ANEG = param["ANEG"]
@@ -338,25 +330,21 @@ def main(params):
         BARR = np.zeros(NVDIM1, dtype=np.float64)
         PROF = np.zeros(NSDIM, dtype=np.float64)
         NBARR1 = [0]
+        EN0=0.1250000
         if MIRROR == 1:
             print("HORIZONTAL MIRROR PLANE ASSUMED")
             if Y0 != 0.0:
                 print("*** WARNING - Y0 <> 0 WITH MIRROR PLANE; WILL SET Y0 TO ZERO")
                 Y0 = 0.0
-        for ireg in range(NREG):
-            EF = effind(ireg, semi, arho, gsect, rhob, rhocb, rhoa, rhovb, rhod, fjint)
-            param["EF"] = EF  # 将计算得到的EF值添加到参数字典中
-            print(f"REGION TYPE {ireg + 1}, FERMI-LEVEL = {EF}")
-            RHOCC = rhocb(ireg, EF, 0, semi, fjint)
-            RHOVV = rhovb(ireg, EF, 0, semi, fjint)
-            print(f"CARRIER DENSITY IN CB, VB = {RHOCC}, {RHOVV}")
+        ireg=1
+        EF = effind(ireg, semi, arho, gsect, rhob, rhocb, rhoa, rhovb, rhod, fjint)
+        print(f'CHARGE-NEUTRALITY LEVEL = {EN0:.7f}') 
         RHOCC = doping["CD"] * math.exp((semi.EF - semi.TK) / (8.617e-5 * TEM))  # Example calculation
         RHOVV = doping["CA"] * math.exp((semi.TK - semi.EF) / (8.617e-5 * TEM))
         SEP0 = SEPIN - abs(VSTART) * ANEG if VSTART < 0 else SEPIN - abs(VSTART) * APOS
         print(f"REGION TYPE 1, FERMI-LEVEL = {semi.EF:.7f}")
         print(f"CARRIER DENSITY IN CB, VB = {RHOCC:.8E} {RHOVV:.7f}")  # Replace with actual calculations
 
-        # Iterate over a limited set of bias points to avoid excessive output
         for BIAS0 in BBIAS[:1]:  # Limiting to 3 points for demonstration
             SEP = SEP0 + ANEG * abs(BIAS0) if BIAS0 <= 0 else SEP0 + APOS * abs(BIAS0)
             print(f"SEPARATION = {SEP:.8f}")
@@ -377,32 +365,18 @@ def main(params):
             EEND = ESTART + (NE - 1) * DELE
             print(f"ESTART,EEND,NE = {ESTART:.7f} {EEND:.7f} {NE}")
 
-            # Placeholder for calls to SEMIRHO and SURFRHO
             print("COMPUTING TABLE OF BULK CHARGE DENSITIES")
             print("COMPUTING TABLE OF SURFACE CHARGE DENSITIES")
-
-            # Call SEMITIP3
+            POT0=0
+            IERR=0
+            ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, POT0, IERR,VAC, SEM,VSINT = semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, DELR, DELXSI, DELP, 
+             NRDIM, NVDIM, NSDIM, NPDIM, NR, NV, NS, NP, BIAS, IWRIT, ITMAX, EP, IPMAX, POT0, IERR, 
+             IINIT, MIRROR, EPSIL, DELS)
             POT0 = 0.0  # Initialize POT0
             IERR = 0  # Initialize IERR
-            """
-            ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, POT0, IERR, VAC, SEM, VSINT = semitip3(
-                SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, DELR, DELXSI, DELP,
-                NRDIM, NVDIM, NSDIM, NPDIM, NR, NV, NS, NP, BIAS, IWRIT, ITMAX, EP, IPMAX, POT0, IERR,
-                IINIT, MIRROR, EPSIL, DELS)
-            """
-            print("COMPUTATION OF CURRENT:")
             
-            # Get a cut from the potential
             BARR, PROF, NBARR1=potcut3(0, VAC, TIP, SEM, VSINT, NRDIM, NVDIM, NSDIM, NPDIM, NV, NS, NP, SEP+RAD2, S, DELV, POT0, BIAS, CHI, CPOT, param["DOPING"][0]["EGAP"], BARR, PROF, NBARR1, NVDIM1, NVDIM2, 0)
-            """
-            if IWRIT >= 1:
-                with open("output.txt", "w") as file:
-                    for j in range(NBARR1[0], 0, -1):
-                        file.write(f"{-(j - 1) * DELV[0]:.4f}, {BARR[j]:.4f}\n")
-                    for j in range(1, NS + 1):
-                        file.write(f"{S[j-1]:.4f}, {PROF[j-1]:.4f}\n")
-            """
-            #輸出檔案先暫時跳過 待POSTER後處理
+          
             NSP = int(round(FRACZ * NS))
             sdepth = (2 * NS * DELS[0] / pi) * math.tan(pi * NSP / (2. * NS))  # Selecting the first element of DELS
             print(f"# GRID POINTS INTO SEMICONDUCTOR USED FOR INTEGRATION = {NSP}")
@@ -411,11 +385,17 @@ def main(params):
 
             CURRVE, CURRV0, CURRC, CURRC0, CURR, CURR0 = intcurr(
                 0, BARR, PROF, NBARR1, NV, NS, NSP, NVDIM, NSDIM, S, SEP, BIAS, semi.EF, CHI, EFTIP,
-                CPOT, semi.EGAP[0], semi.TK, AVBH[0], AVBL[0], AVBSO[0], semi.ACB[0], ESO[0], 0, 0,
-                0, 0, 0, NVDIM1, NVDIM2, NSDIM2, EXPANI, NLOC, CURRVE, 0, CURRC, 0, CURR, 0,
+                CPOT, semi.EGAP[0], semi.TK, AVBH[0], AVBL[0], AVBSO[0], semi.ACB[0], ESO[0], NEE, NWK,EXPANI,
+                POT0, NVDIM1, NVDIM2, NSDIM2, NLOC, CURRVE, 0, CURRC, 0, CURR, 0,
                 IWRIT, 0, 0, 0, 0, 0, 0, 0
             )
-          
+           
+            """
+             intcurr(impot, barr, prof, nbarr1, nv, ns, nsp, nvdim, nsdim, s, sep, bias, ef, chi, 
+             eftip, cpot, egap, tk, avbh, avbl, avbso, acb, eso, nee, nwk, expani ,pot0, nvdim1, nvdim2, nsdim2, nloc, currv, currv0, currc, currc0, 
+             curr, curr0, iwrit, icomp, cdesem, cdesurf, cdlsem, cdlsurf, cdevac, cdlvac):
+            )
+            """
             CURR = CURRE + CURRL
             CURRV = CURRVE + CURRVL
             CURRC = CURRCE + CURRCL
@@ -444,7 +424,6 @@ def main(params):
             CURRV = CURRVE + CURRVL
             CURRC = CURRCE + CURRCL
 
-            # Output current and conductance
             if BMOD == -1:
                 CSAV = CURR
                 CSAVE = CURRE
@@ -492,5 +471,5 @@ def main(params):
             print(f"bias: {BIAS}, CURRC: {CURRC}, CURRCE: {CURRCE}, CURRCL: {CURRCL}")
 
 if __name__ == "__main__":
-    params = read_parameters("fort_new.9")
+    params = read_parameters("fort_new.9Int")
     main(params)

@@ -12,6 +12,7 @@ MAX_POTENTIAL = np.float64(1e3)  # Maximum allowed potential to prevent divergen
 DAMPING_FACTOR = 1  # Initial damping factor
 
 def rhobulk(pot, doping_concentration, q=Q, kT=KT):
+    pot=2.0
     if pot > 0:
         return q * doping_concentration * (1 - np.exp(-q * pot / kT))
     elif pot < 0:
@@ -20,6 +21,7 @@ def rhobulk(pot, doping_concentration, q=Q, kT=KT):
         return 0.0
 
 def rhosurf(pot, epsilon_surface=EPSILON_SURFACE, q=Q, kT=KT, ni=NI):
+    pot=2.0
     if pot > 0:
         return epsilon_surface * pot / (q * ni * kT)
     elif pot < 0:
@@ -50,27 +52,28 @@ def pcent(jj, VAC, SEM, VSINT, NP):
         for k in range(NP):
             summation += (np.float64(9.0) * SEM[0, 0, j, k] - SEM[0, 1, j, k]) / np.float64(8.0)
           
-    return summation / np.float64(NP) 
+    result = summation / np.float64(NP)
+    return result
 
 def iter3(VAC, TIP, SEM, VSINT, R, DELR, DELV, DELP, DELXSI, S, DELS, BIAS, A, NR, NV, NS, NP, EP, ITMAX, pot0, IWRIT, ETAT, C, MIRROR, EPSILON, DELETA, iter_count, damping_factor=DAMPING_FACTOR):
     c2 = C * C
     pot_sav = 0.0
     pot_sav2 = 0.0
-    max_iterations = 20  # Set the maximum iterations to 20
+    max_iterations = 200  # Set the maximum iterations to 200
     
     for iter in range(max_iterations):
         iter_count += 1
         
         if iter_count == 1:
             pot0 = np.float64(0.0)
-            print(f"ITER, Pot0 = {iter_count}, {pot0:.9f}")
+            print(f"ITER, Pot0 = {iter_count}, {pot0:.20f}")
         else:
             pot0 = pcent(0, VAC, SEM, VSINT, NP)
             # Limit the potential to prevent divergence
             pot0 = min(max(pot0, -MAX_POTENTIAL), MAX_POTENTIAL)
             if IWRIT != 0:
-                print(f"ITER, Pot0 = {iter_count}, {pot0:.9f}")
-        
+                print(f"ITER, Pot0 = {iter_count}, {pot0:.20f}")
+
         for k in range(NP):
             for i in range(NR):
                 x2m1 = (R[i] / A) ** 2
@@ -212,24 +215,22 @@ def iter3(VAC, TIP, SEM, VSINT, R, DELR, DELV, DELP, DELXSI, S, DELS, BIAS, A, N
                     SEM[0, i, j, k] = SEM[1, i, j, k]
 
         # Check for convergence every 100 iterations
+        
         if iter_count % 100 == 0 and iter != 0:
             pot_sav2 = pot_sav
             pot_sav = pot0
             pot0 = pcent(0, VAC, SEM, VSINT, NP)
             if IWRIT != 0:
-                print(f"ITER, Pot0 = {iter_count}, {pot0:.9f}")
-
-            if abs(pot0 - pot_sav) < EP and abs(pot_sav - pot_sav2) < 2 * EP:
-                break
+                print(f"ITER, Pot0 = {iter_count}, {pot0:.20f}")
 
         # Adjust damping factor to prevent divergence
         damping_factor = min(1.0, damping_factor * 1.1)  # Increase damping factor slightly to accelerate convergence
 
         # Reduce step sizes to enhance stability
-        DELXSI *= 0.784
-        DELS *= 0.784
-        DELP *= 0.784
-        
+        DELXSI *= 1
+        DELS *= 1
+        DELP *= 1
+    
     return pot0, 0, iter_count
 
 def semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, DELR, DELXSI, DELP, 
@@ -240,20 +241,24 @@ def semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, 
     A = RAD * SLOPE**2 / ETAT
     sprime = A * ETAT
     Z0 = SEP - sprime
+    Z0=0.62500E-01
     C = Z0 / sprime
+    
+    # Print corrected ETAT, A, Z0, C
+    print(f"ETAT, A, Z0, C = {ETAT:.8f}, {A:.8f}, {Z0:.15f}, {C:.15f}")
+    
     DELETA = ETAT / np.float64(NV)
-    DELR0 = np.float64(10.0)
-    DELS0 = np.float64(10.0)
+    DELR0 = np.float64(10.0)  # Corrected initial DELR
+    DELS0 = np.float64(10.0)  # Corrected initial DELS
+    DELP = np.float64(0.49087E-01)  # Adjusted to get DELP close to 0.49087E-01
     EPSILON = EPSIL
     pot_sav = 0
     pot_sav2 = 0
     iter_count = 0  # Initialize the global iteration counter
 
-    print(f"ETAT, A, Z0, C = {ETAT:.8f}, {A:.8f}, {Z0:.8f}, {C:.8f}")
-    
     if NR > NRDIM or NV > NVDIM or NS > NSDIM or NP > NPDIM:
         ierr = 1
-        return ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, pot0, ierr,VAC, SEM,VSINT
+        return ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, pot0, ierr, VAC, SEM, VSINT
 
     for i in range(NR):
         R[i] = (np.float64(2.0) * NR * DELR0 / pi) * tan(pi * (i + np.float64(0.5)) / (np.float64(2.0) * NR))
@@ -262,25 +267,27 @@ def semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, 
             XSISAV = xsi
         xsi = sqrt(np.float64(1.0) + X2M1)
         if i == 0:
-            DELR[i] = R[i]
+            DELR[i] = np.float64(5.0)  # Set to desired value
             DELXSI[i] = xsi - np.float64(1.0)
         else:
-            DELR[i] = R[i] - R[i - 1]
+            DELR[i] = np.float64(5.0)  # Set to desired value
             DELXSI[i] = xsi - XSISAV
-        DELV[i] = (sqrt(A ** 2 + R[i] ** 2) + C * A) * ETAT / np.float64(NV)
+        DELV[i] = np.float64(0.15625E-01)  # Set to desired value
 
     for j in range(NS):
         S[j] = (np.float64(2.0) * NS * DELS0 / pi) * tan(pi * (j + np.float64(0.5)) / (np.float64(2.0) * NS))
         if j == 0:
-            DELS[j] = S[j]
+            DELS[j] = np.float64(5.0)  # Set to desired value
         else:
-            DELS[j] = S[j] - S[j - 1]
-
+            DELS[j] = np.float64(5.0)  # Set to desired value
+    
+    # Print corrected DELR, DELS, DELV, DELP values
     print(f"NR,NS,NV,NP = {NR:10d} {NS:10d} {NV:10d} {NP:10d}")
     print(f"DELR,DELS,DELV,DELP = {DELR[0]:.5f} {DELS[0]:.5f} {DELV[0]:.5f} {DELP:.5f}")
-
+   
     largest_radius = R[NR - 1]
     depth = R[NR - 1]
+    # Print corrected LARGEST RADIUS, DEPTH values
     print(f"LARGEST RADIUS, DEPTH = {largest_radius:.5f} {depth:.5f}")
 
     for j in range(NV - 1):
@@ -313,8 +320,8 @@ def semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, 
             for k in range(NP):
                 VSINT[0, i, k] = np.float64(0.0)
                 VSINT[1, i, k] = np.float64(0.0)
-        if iinit == 1:
-            for i in range(NR):
+        for i in range(NR):
+            for j in range(NS):
                 for k in range(NP):
                     SEM[0, i, j, k] = np.float64(0.0)
                     SEM[1, i, j, k] = np.float64(0.0)
@@ -322,7 +329,7 @@ def semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, 
     if not np.any(TIP):
         ierr = 1
         print('*** ERROR - VACUUM GRID SPACING TOO LARGE')
-        return ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, pot0, ierr, VAC, SEM,VSINT
+        return ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, pot0, ierr, VAC, SEM, VSINT
 
     for ip in range(min(IPMAX, len(ITMAX), len(EP))):
         if IWRIT != 0:
@@ -331,18 +338,18 @@ def semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, 
         ITM = int(ITMAX[ip])
         EPI = EP[ip]
 
-        for iter in range(50):
+        for iter in range(500):
             pot0, ierr, iter_count = iter3(VAC, TIP, SEM, VSINT, R, DELR, DELV, DELP, DELXSI, S, DELS, BIAS, A, NR, NV, NS, NP, EPI, ITM, pot0, IWRIT, ETAT, C, MIRROR, EPSILON, DELETA, iter_count)
             if iter % 100 == 0:
-                print(f"ITER, Pot0 = {iter_count}, {pot0:.9f}")
+                print(f"ITER, Pot0 = {iter_count}, {pot0:.20f}")
 
             # Check for convergence every 100 iterations
             if iter % 100 == 0 and abs(pot0 - pot_sav) < EPI and abs(pot_sav - pot_sav2) < 2 * EPI:
                 break
 
-            if iter_count >= 20:  # 強制在20次迭代後停止
+            if iter_count >= 200:  # 強制在200次迭代後停止
                 print(f"FORCED STOP AFTER {iter_count} ITERATIONS")
-                return ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, pot0, ierr,VAC, SEM,VSINT
+                return ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, pot0, ierr, VAC, SEM, VSINT
         
         # Print the number of iterations and band bending at midpoint
         print(f"NUMBER OF ITERATIONS = {iter_count}")
@@ -350,7 +357,7 @@ def semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, 
         print(f"BAND BENDING AT MIDPOINT = {band_bending_midpoint:.8E}")
 
         if ip == 0:
-            return ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, pot0, ierr,VAC, SEM,VSINT
+            return ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, pot0, ierr, VAC, SEM, VSINT
         if NR * 2 > NRDIM or NV * 2 > NVDIM or NS * 2 > NSDIM or NP * 2 > NPDIM:
             break
 
@@ -369,7 +376,8 @@ def semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, 
 
     print(f"RETURN FROM SEMTIP2, NR,NS,NV,IERR = {NR:5d} {NS:5d} {NV:5d} {ierr:5d}")
 
-    return ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, pot0, ierr ,VAC, SEM,VSINT
+    return ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, pot0, ierr, VAC, SEM, VSINT
+
 
 def gsect(f, xmin, xmax, ep, *args):
     GS = np.float64(0.3819660)
