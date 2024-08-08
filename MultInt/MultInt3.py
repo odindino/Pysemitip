@@ -465,5 +465,5 @@ def main(params):
             print(f"bias: {BIAS}, CURRC: {CURRC}, CURRCE: {CURRCE}, CURRCL: {CURRCL}")
 
 if __name__ == "__main__":
-    params = read_parameters("fort_new.9Int")
+    params = read_parameters("fort_int.9")
     main(params)
