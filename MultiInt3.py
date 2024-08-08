@@ -372,7 +372,6 @@ def main(params):
             ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, POT0, IERR,VAC, SEM,VSINT = semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, DELR, DELXSI, DELP, 
              NRDIM, NVDIM, NSDIM, NPDIM, NR, NV, NS, NP, BIAS, IWRIT, ITMAX, EP, IPMAX, POT0, IERR, 
              IINIT, MIRROR, EPSIL, DELS)
-            POT0 = 0.0  # Initialize POT0
             IERR = 0  # Initialize IERR
             
             BARR, PROF, NBARR1=potcut3(0, VAC, TIP, SEM, VSINT, NRDIM, NVDIM, NSDIM, NPDIM, NV, NS, NP, SEP+RAD2, S, DELV, POT0, BIAS, CHI, CPOT, param["DOPING"][0]["EGAP"], BARR, PROF, NBARR1, NVDIM1, NVDIM2, 0)
@@ -390,12 +389,7 @@ def main(params):
                 IWRIT, 0, 0, 0, 0, 0, 0, 0
             )
            
-            """
-             intcurr(impot, barr, prof, nbarr1, nv, ns, nsp, nvdim, nsdim, s, sep, bias, ef, chi, 
-             eftip, cpot, egap, tk, avbh, avbl, avbso, acb, eso, nee, nwk, expani ,pot0, nvdim1, nvdim2, nsdim2, nloc, currv, currv0, currc, currc0, 
-             curr, curr0, iwrit, icomp, cdesem, cdesurf, cdlsem, cdlsurf, cdevac, cdlvac):
-            )
-            """
+            
             CURR = CURRE + CURRL
             CURRV = CURRVE + CURRVL
             CURRC = CURRCE + CURRCL
@@ -408,7 +402,7 @@ def main(params):
                 CURRVL = 0.0
                 print('VB LOCALIZED INVERSION CURRENT SET TO ZERO')
 
-            print('valence band current ext,loc =', CURRVE, CURRVL)
+            print(f'valence band current ext,loc = {CURRVE:.14f}, {CURRVL:.14f}')
 
             if semi.IINV[0] in [2, 3] and CURRCE < 0:
                 CURRCE = 0.0

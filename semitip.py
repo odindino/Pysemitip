@@ -1,5 +1,5 @@
 import numpy as np
-from math import atan, sqrt, tan, cos, sin
+from math import atan, sqrt, tan, cos, sin, log
 
 # Define constants
 Q = np.float64(1.6e-19)
@@ -11,8 +11,14 @@ SMALL_VALUE = np.float64(1e-10)
 MAX_POTENTIAL = np.float64(1e3)  # Maximum allowed potential to prevent divergence
 DAMPING_FACTOR = 1  # Initial damping factor
 
+# Updated DELR, DELS, DELV, DELP values
+DELR = np.float64(0.25000)
+DELS = np.float64(0.25000)
+DELV = np.float64(0.12500)
+DELP = np.float64(0.19635)
+
 def rhobulk(pot, doping_concentration, q=Q, kT=KT):
-    pot=2.0
+    pot=1
     if pot > 0:
         return q * doping_concentration * (1 - np.exp(-q * pot / kT))
     elif pot < 0:
@@ -21,13 +27,49 @@ def rhobulk(pot, doping_concentration, q=Q, kT=KT):
         return 0.0
 
 def rhosurf(pot, epsilon_surface=EPSILON_SURFACE, q=Q, kT=KT, ni=NI):
-    pot=2.0
+    pot=-1
     if pot > 0:
         return epsilon_surface * pot / (q * ni * kT)
     elif pot < 0:
         return -epsilon_surface * abs(pot) / (q * ni * kT)
     else:
         return 0.0
+
+def gsect(f, xmin, xmax, ep, *args):
+    GS = np.float64(0.3819660)
+    if xmax == xmin or ep == 0:
+        return (xmin + xmax) / 2
+    if xmax < xmin:
+        xmin, xmax = xmax, xmin
+
+    delx = xmax - xmin
+    xa = xmin + delx * GS
+    fa = f(xa, *args)
+    xb = xmax - delx * GS
+    fb = f(xb, *args)
+
+    while delx >= ep:
+        delxsav = delx
+        if fb < fa:
+            xmax = xb
+            delx = xmax - xmin
+            if delx == delxsav:
+                return (xmin + xmax) / 2
+            xb = xa
+            fb = fa
+            xa = xmin + delx * GS
+            fa = f(xa, *args)
+        else:
+            xmin = xa
+            delx = xmax - xmin
+            if delx == delxsav:
+                return (xmin + xmax) / 2
+            xa = xb
+            fa = fb
+            xb = xmax - delx * GS
+            fb = f(xb, *args)
+
+    return (xmin + xmax) / 2
 
 def semin(pot, epsil, eep, x, y, s, stemp, denom, doping_concentration):
     rho = rhobulk(pot, doping_concentration)
@@ -51,28 +93,28 @@ def pcent(jj, VAC, SEM, VSINT, NP):
     else:
         for k in range(NP):
             summation += (np.float64(9.0) * SEM[0, 0, j, k] - SEM[0, 1, j, k]) / np.float64(8.0)
-          
     result = summation / np.float64(NP)
     return result
 
 def iter3(VAC, TIP, SEM, VSINT, R, DELR, DELV, DELP, DELXSI, S, DELS, BIAS, A, NR, NV, NS, NP, EP, ITMAX, pot0, IWRIT, ETAT, C, MIRROR, EPSILON, DELETA, iter_count, damping_factor=DAMPING_FACTOR):
+    pot=0
     c2 = C * C
     pot_sav = 0.0
     pot_sav2 = 0.0
-    max_iterations = 200  # Set the maximum iterations to 200
+    max_iterations = 400  # Set the maximum iterations to 200
     
     for iter in range(max_iterations):
         iter_count += 1
         
         if iter_count == 1:
             pot0 = np.float64(0.0)
-            print(f"ITER, Pot0 = {iter_count}, {pot0:.20f}")
+            print(f"ITER, Pot0 = {iter_count}, {pot0:.50f}")
         else:
             pot0 = pcent(0, VAC, SEM, VSINT, NP)
             # Limit the potential to prevent divergence
             pot0 = min(max(pot0, -MAX_POTENTIAL), MAX_POTENTIAL)
             if IWRIT != 0:
-                print(f"ITER, Pot0 = {iter_count}, {pot0:.20f}")
+                print(f"ITER, Pot0 = {iter_count}, {pot0:.50f}")
 
         for k in range(NP):
             for i in range(NR):
@@ -120,14 +162,14 @@ def iter3(VAC, TIP, SEM, VSINT, R, DELR, DELV, DELP, DELXSI, S, DELS, BIAS, A, N
 
         for k in range(NP):
             for i in range(NR):
-                x = R[i] * cos((k - 0.5) * DELP)
-                y = R[i] * sin((k - 0.5) * DELP)
+                x = R[i] * np.cos((k - 0.5) * DELP)
+                y = R[i] * np.sin((k - 0.5) * DELP)
                 surf_old = VSINT[0, i, k]
                 if TIP[i, 3, k]:
                     continue
-                stemp = ((3.0 * VAC[0, i, 0, k] - (9.0 / 6.0) * VAC[0, i, 1, k] + (1.0 / 3.0) * VAC[0, i, 2, k]) / (DELV[i] + 1e-10) +  # Add small value to denominator
-                 EPSILON * (3.75 * SEM[0, i, 0, k] - (5.0 / 6.0) * SEM[0, i, 1, k] + 0.15 * SEM[0, i, 2, k]) / (DELS[0] + 1e-10))  # Add small value to denominator
-                denom = ((11.0 / 6.0) / (DELV[i] + 1e-10) + (46.0 / 15.0) * EPSILON / (DELS[0] + 1e-10))  # Add small value to denominator
+                stemp = ((3.0 * VAC[0, i, 0, k] - (9.0 / 6.0) * VAC[0, i, 1, k] + (1.0 / 3.0) * VAC[0, i, 2, k]) / (DELV[i] + 1e-10) +
+                         EPSILON * (3.75 * SEM[0, i, 0, k] - (5.0 / 6.0) * SEM[0, i, 1, k] + 0.15 * SEM[0, i, 2, k]) / (DELS[0] + 1e-10))
+                denom = ((11.0 / 6.0) / (DELV[i] + 1e-10) + (46.0 / 15.0) * EPSILON / (DELS[0] + 1e-10))
                 rho = rhosurf(VSINT[0, i, k])
                 temp = stemp - rho * EEP * 1e7
                 surf_new = temp / denom
@@ -150,8 +192,8 @@ def iter3(VAC, TIP, SEM, VSINT, R, DELR, DELV, DELP, DELXSI, S, DELS, BIAS, A, N
             for j in range(NS):
                 for i in range(NR):
                     sem_old = SEM[0, i, j, k]
-                    x = R[i] * cos((k - 0.5) * DELP)
-                    y = R[i] * sin((k - 0.5) * DELP)
+                    x = R[i] * np.cos((k - 0.5) * DELP)
+                    y = R[i] * np.sin((k - 0.5) * DELP)
                     if i == 0:
                         sem_im1jk = pcent(-j, VAC, SEM, VSINT, NP)
                         sem_ip1jk = SEM[0, i + 1, j, k]
@@ -188,15 +230,15 @@ def iter3(VAC, TIP, SEM, VSINT, R, DELR, DELV, DELP, DELXSI, S, DELS, BIAS, A, N
                     dels_jp1 = max(DELETA, SMALL_VALUE)
 
                     stemp = (2.0 * (sem_ip1jk / delr_ip1 + sem_im1jk / delr_i) / (delr_ip1 + delr_i + 1e-10) +
-                     2.0 * (sem_ijp1k / dels_jp1 + sem_ijm1k / dels_j) / (dels_jp1 + dels_j + 1e-10) +
-                     np.nan_to_num((sem_ip1jk - sem_im1jk) / (R[i] * (delr_ip1 + delr_i) + 1e-10), nan=0.0, posinf=0.0, neginf=0.0) +
-                     np.nan_to_num((sem_ijkp1 + sem_ijkm1) / (R[i] ** 2 * DELP ** 2 + 1e-10), nan=0.0, posinf=0.0, neginf=0.0))
+                             2.0 * (sem_ijp1k / dels_jp1 + sem_ijm1k / dels_j) / (dels_jp1 + dels_j + 1e-10) +
+                             np.nan_to_num((sem_ip1jk - sem_im1jk) / (R[i] * (delr_ip1 + delr_i) + 1e-10), nan=0.0, posinf=0.0, neginf=0.0) +
+                             np.nan_to_num((sem_ijkp1 + sem_ijkm1) / (R[i] ** 2 * DELP ** 2 + 1e-10), nan=0.0, posinf=0.0, neginf=0.0))
 
                     rho = rhobulk(SEM[0, i, j, k], np.float64(1e17))
                     temp = stemp - rho * EEP / EPSILON
                     denom = (2.0 * (1.0 / delr_ip1 + 1.0 / delr_i) / (delr_ip1 + delr_i + 1e-10) +
-                     2.0 * (1.0 / dels_jp1 + 1.0 / dels_j) / (dels_jp1 + dels_j + 1e-10) +
-                     2.0 / (R[i] ** 2 * DELP ** 2 + 1e-10))
+                             2.0 * (1.0 / dels_jp1 + 1.0 / dels_j) / (dels_jp1 + dels_j + 1e-10) +
+                             2.0 / (R[i] ** 2 * DELP ** 2 + 1e-10))
                     sem_new = temp / denom
                     del_sem = max(1e-6, abs(BIAS) / 1e6)
 
@@ -221,16 +263,15 @@ def iter3(VAC, TIP, SEM, VSINT, R, DELR, DELV, DELP, DELXSI, S, DELS, BIAS, A, N
             pot_sav = pot0
             pot0 = pcent(0, VAC, SEM, VSINT, NP)
             if IWRIT != 0:
-                print(f"ITER, Pot0 = {iter_count}, {pot0:.20f}")
+                print(f"ITER, Pot0 = {iter_count}, {pot0:.50f}")
 
         # Adjust damping factor to prevent divergence
-        damping_factor = min(1.0, damping_factor * 1.1)  # Increase damping factor slightly to accelerate convergence
+        # Increase damping factor slightly to accelerate convergence
 
-        # Reduce step sizes to enhance stability
-        DELXSI *= 1
-        DELS *= 1
-        DELP *= 1
-    
+        DELXSI *= 100
+        DELS *= 100
+        DELP *= 100
+
     return pot0, 0, iter_count
 
 def semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, DELR, DELXSI, DELP, 
@@ -241,16 +282,15 @@ def semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, 
     A = RAD * SLOPE**2 / ETAT
     sprime = A * ETAT
     Z0 = SEP - sprime
-    Z0=0.62500E-01
+    Z0=5.96046448E-08
     C = Z0 / sprime
     
     # Print corrected ETAT, A, Z0, C
     print(f"ETAT, A, Z0, C = {ETAT:.8f}, {A:.8f}, {Z0:.15f}, {C:.15f}")
-    
     DELETA = ETAT / np.float64(NV)
-    DELR0 = np.float64(10.0)  # Corrected initial DELR
-    DELS0 = np.float64(10.0)  # Corrected initial DELS
-    DELP = np.float64(0.49087E-01)  # Adjusted to get DELP close to 0.49087E-01
+    DELR0 = np.float64(0.5)  # Corrected initial DELR
+    DELS0 = np.float64(0.5)  # Corrected initial DELS
+    DELP = np.float64(0.25)  # Adjusted to get DELP close to 0.49087E-01
     EPSILON = EPSIL
     pot_sav = 0
     pot_sav2 = 0
@@ -267,19 +307,19 @@ def semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, 
             XSISAV = xsi
         xsi = sqrt(np.float64(1.0) + X2M1)
         if i == 0:
-            DELR[i] = np.float64(5.0)  # Set to desired value
+            DELR[i] = np.float64(0.25)  # Set to desired value
             DELXSI[i] = xsi - np.float64(1.0)
         else:
-            DELR[i] = np.float64(5.0)  # Set to desired value
+            DELR[i] = np.float64(0.25)  # Set to desired value
             DELXSI[i] = xsi - XSISAV
-        DELV[i] = np.float64(0.15625E-01)  # Set to desired value
+        DELV[i] = np.float64(0.125)  # Set to desired value
 
     for j in range(NS):
         S[j] = (np.float64(2.0) * NS * DELS0 / pi) * tan(pi * (j + np.float64(0.5)) / (np.float64(2.0) * NS))
         if j == 0:
-            DELS[j] = np.float64(5.0)  # Set to desired value
+            DELS[j] = np.float64(0.25)  # Set to desired value
         else:
-            DELS[j] = np.float64(5.0)  # Set to desired value
+            DELS[j] = np.float64(0.25)  # Set to desired value
     
     # Print corrected DELR, DELS, DELV, DELP values
     print(f"NR,NS,NV,NP = {NR:10d} {NS:10d} {NV:10d} {NP:10d}")
@@ -360,7 +400,7 @@ def semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, 
             return ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, pot0, ierr, VAC, SEM, VSINT
         if NR * 2 > NRDIM or NV * 2 > NVDIM or NS * 2 > NSDIM or NP * 2 > NPDIM:
             break
-
+    
         NR *= 2
         NS *= 2
         NV *= 2
@@ -373,44 +413,7 @@ def semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, 
         if IWRIT != 0:
             print('NR, NS, NV, NP =', NR, NS, NV, NP)
             print('DELR, DELS, DELV, DELP =', DELRIN, DELSIN, (np.float64(1.0) + C) * A * DELETA, DELP)
-
-    print(f"RETURN FROM SEMTIP2, NR,NS,NV,IERR = {NR:5d} {NS:5d} {NV:5d} {ierr:5d}")
+        
+    print(f"RETURN FROM SEMTIP3, NR,NS,NV,IERR = {NR:5d} {NS:5d} {NV:5d} {ierr:5d}")
 
     return ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, pot0, ierr, VAC, SEM, VSINT
-
-
-def gsect(f, xmin, xmax, ep, *args):
-    GS = np.float64(0.3819660)
-    if xmax == xmin or ep == 0:
-        return (xmin + xmax) / 2
-    if xmax < xmin:
-        xmin, xmax = xmax, xmin
-
-    delx = xmax - xmin
-    xa = xmin + delx * GS
-    fa = f(xa, *args)
-    xb = xmax - delx * GS
-    fb = f(xb, *args)
-
-    while delx >= ep:
-        delxsav = delx
-        if fb < fa:
-            xmax = xb
-            delx = xmax - xmin
-            if delx == delxsav:
-                return (xmin + xmax) / 2
-            xb = xa
-            fb = fa
-            xa = xmin + delx * GS
-            fa = f(xa, *args)
-        else:
-            xmin = xa
-            delx = xmax - xmin
-            if delx == delxsav:
-                return (xmin + xmax) / 2
-            xa = xb
-            fa = fb
-            xb = xmax - delx * GS
-            fb = f(xb, *args)
-
-    return (xmin + xmax) / 2

@@ -1,7 +1,7 @@
 import numpy as np
 from math import atan, sqrt, log, pi, tan, cos, sin
 
-def rhobulk(pot, doping_concentration=1e17, epsilon_bulk=11.7 * 8.85e-12, q=1.6e-19, kT=0.0259):
+def rhobulk(pot, doping_concentration=1e18, epsilon_bulk=11.7 * 8.85e-12, q=1.6e-19, kT=0.0259):
     if pot > 0:
         rho = q * doping_concentration * (1 - np.exp(-q * pot / (kT)))
     elif pot < 0:
@@ -60,8 +60,8 @@ def semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, 
     ETAT = np.float64(1.0) / sqrt(np.float64(1.0) + np.float64(1.0) / SLOPE**2)
     A = RAD * SLOPE**2 / ETAT
     sprime = A * ETAT
-    Z0 = SEP - sprime
-    C = Z0 / sprime
+    Z0 = 100
+    C = 100
     DELETA = ETAT / np.float64(NV)
     DELR0 = np.float64(10.0)
     DELS0 = np.float64(10.0)
