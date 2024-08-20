@@ -388,12 +388,12 @@ def main(params):
                 POT0, NVDIM1, NVDIM2, NSDIM2, NLOC, CURRVE, 0, CURRC, 0, CURR, 0,
                 IWRIT, 0, 0, 0, 0, 0, 0, 0
             )
-           
+            
             
             CURR = CURRE + CURRL
             CURRV = CURRVE + CURRVL
             CURRC = CURRCE + CURRCL
-
+            print(f'valence band current ext,loc = {CURRVE:.20f}, {CURRVL:.20f}')
             if semi.IINV[0] in [1, 3] and CURRVE > 0:
                 CURRVE = 0.0
                 print('VB EXTENDED INVERSION CURRENT SET TO ZERO')

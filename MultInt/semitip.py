@@ -96,183 +96,175 @@ def pcent(jj, VAC, SEM, VSINT, NP):
     result = summation / np.float64(NP)
     return result
 
-def iter3(VAC, TIP, SEM, VSINT, R, DELR, DELV, DELP, DELXSI, S, DELS, BIAS, A, NR, NV, NS, NP, EP, ITMAX, pot0, IWRIT, ETAT, C, MIRROR, EPSILON, DELETA, iter_count, damping_factor=DAMPING_FACTOR):
-    pot=0
-    c2 = C * C
-    pot_sav = 0.0
-    pot_sav2 = 0.0
-    max_iterations = 400  # Set the maximum iterations to 200
-    
-    for iter in range(max_iterations):
-        iter_count += 1
-        
-        if iter_count == 1:
-            pot0 = np.float64(0.0)
-            print(f"ITER, Pot0 = {iter_count}, {pot0:.50f}")
-        else:
-            pot0 = pcent(0, VAC, SEM, VSINT, NP)
-            # Limit the potential to prevent divergence
-            pot0 = min(max(pot0, -MAX_POTENTIAL), MAX_POTENTIAL)
-            if IWRIT != 0:
-                print(f"ITER, Pot0 = {iter_count}, {pot0:.50f}")
+def iter3(VAC, TIP, SEM, VSINT, R, DELR, DELV, DELXSI, S, DELS, BIAS,
+          DELR0, DELS0, DELP, DELETA, A, NRDIM, NVDIM, NSDIM, NPDIM, NR, NV, NS, NP,
+          EP, ITMAX, POT0, IWRITE, ETAT, C, MIRROR, IERR, EPSIL, IBC):
 
-        for k in range(NP):
-            for i in range(NR):
-                x2m1 = (R[i] / A) ** 2
-                xsi = sqrt(1.0 + x2m1)
-                for j in range(NV - 1):
-                    if TIP[i, j, k]:
+    EEP = 1.80943e-20
+    EPSIL1 = EPSIL
+    NR1 = NR
+    NS1 = NS
+    NP1 = NP
+
+    POT_SAV = 0.0
+    C2 = C * C
+    C3 = C2 * C
+    C2M1 = C2 - 1.0
+    C2P1 = C2 + 1.0
+    C2P2 = C2 + 2.0
+    C2P6 = C2 + 6.0
+    TC2P2 = 3.0 * C2 + 2.0
+
+    for ITER in range(500):
+        for K in range(NP):
+            for I in range(NR):
+                X2M1 = (R[I] / A) ** 2
+                XSI = np.sqrt(1.0 + X2M1)
+                XSI2 = XSI * XSI
+                XSI3 = XSI2 * XSI
+                XSI4 = XSI3 * XSI
+                XSI5 = XSI4 * XSI
+                DELXSI[I] = R[I] * DELR[I] / (XSI * A ** 2)
+                for J in range(NV - 1):
+                    if TIP[I, J, K]:
                         continue
-                    eta = j * ETAT / NV
-                    eta2 = eta * eta
-                    ome2 = 1.0 - eta ** 2
-                    x2me2c = xsi * (xsi + C) - eta ** 2 * (C * xsi + 1.0)
-                    x2me2c2 = x2me2c * x2me2c
-                    t1 = x2m1 * ((xsi + C) ** 2 - eta ** 2 * (xsi * C * 2.0 + c2 + 1.0)) / x2me2c
-                    t2 = ome2 * (xsi ** 2 - eta ** 2) / x2me2c
-                    t3 = x2me2c / (x2m1 * ome2 + 1e-10)
-                    t4 = -C * eta * x2m1 * ome2 / x2me2c
-                    t5 = (c2 + 1.0) * xsi * (3.0 + xsi) / x2me2c2
-                    t6 = -eta * (c2 + 4.0 * C * xsi + xsi ** 2) / x2me2c2
+                    ETA = J * DELETA
+                    ETA2 = ETA * ETA
+                    ETA3 = ETA2 * ETA
+                    ETA4 = ETA3 * ETA
+                    ETA5 = ETA4 * ETA
+                    OME2 = 1.0 - ETA ** 2
+                    X2ME2 = XSI ** 2 - ETA ** 2
+                    X2ME2C = XSI * (XSI + C) - ETA ** 2 * (C * XSI + 1.0)
+                    X2ME2C2 = X2ME2C * X2ME2C
+                    T1 = X2M1 * ((XSI + C) ** 2 - ETA ** 2 * (XSI * C * 2.0 + C2 + 1.0)) / X2ME2C
+                    T2 = OME2 * X2ME2 / X2ME2C
+                    T3 = X2ME2C / (X2M1 * OME2)
+                    T4 = -C * ETA * X2M1 * OME2 / X2ME2C
+                    T5 = (C3 + 3.0 * C2 * XSI + C * C2P2 * XSI2 + 3.0 * C2 * XSI3 + 4.0 * C * XSI4 +
+                          2.0 * XSI5 + ETA4 * (C3 + TC2P2 * XSI + C * C2P6 * XSI2 + 3.0 * C2 * XSI3) -
+                          2.0 * ETA2 * (C * C2M1 + 3.0 * C2 * XSI + C * C2P6 * XSI2 + TC2P2 * XSI3 + C * XSI4)) / X2ME2C2
+                    T6 = -ETA * (C2 + 4.0 * C * XSI + C2 * XSI2 + 2.0 * XSI4 +
+                                 ETA4 * (2.0 + C2 + 4.0 * C * XSI + C2 * XSI2) -
+                                 2.0 * ETA2 * (C2 + 4.0 * C * XSI + C2P2 * XSI2)) / X2ME2C2
 
-                    vac_im1jk = pcent(j, VAC, SEM, VSINT, NP) if i == 0 else VAC[0, i - 1, j, k]
-                    vac_ip1jk = VAC[0, i, j, k] if i == NR - 1 else VAC[0, i + 1, j, k]
-                    vac_ijkp1 = VAC[0, i, j, k + 1] if k < NP - 1 else VAC[0, i, j, 0]
-                    vac_ijkm1 = VAC[0, i, j, k - 1] if k > 0 else VAC[0, i, j, NP - 1]
+                    if J == 0:
+                        if I == 0:
+                            VAC_IM1JM1K = pcent(J, VAC, SEM, VSINT, NP)
+                        else:
+                            VAC_IM1JM1K = VSINT[0, I-1, K]
+                        VAC_IJM1K = VSINT[0, I, K]
+                        if I != NR - 1:
+                            VAC_IP1JM1K = VSINT[0, I+1, K]
+                        else:
+                            VAC_IP1JM1K = IBC * VSINT[0, I, K]
+                    else:
+                        if I == 0:
+                            VAC_IM1JM1K = pcent(J, VAC, SEM, VSINT, NP)
+                        else:
+                            VAC_IM1JM1K = VAC[0, I-1, J-1, K]
+                        VAC_IJM1K = VAC[0, I, J-1, K]
+                        if I != NR - 1:
+                            VAC_IP1JM1K = VAC[0, I+1, J-1, K]
+                        else:
+                            VAC_IP1JM1K = IBC * VAC[0, I, J-1, K]
 
-                    delr_i = max(DELXSI[i], SMALL_VALUE)
-                    delr_ip1 = max(DELXSI[i + 1], SMALL_VALUE)
-                    dels_j = max(DELETA, SMALL_VALUE)
-                    dels_jp1 = max(DELETA, SMALL_VALUE)
+                    if I == 0:
+                        VAC_IP1JK = VAC[0, I+1, J, K]
+                        VAC_IM1JK = VAC_IM1JM1K = pcent(J, VAC, SEM, VSINT, NP)
+                        VAC_IP1JP1K = VAC[0, I+1, J+1, K]
+                        VAC_IM1JP1K = VAC_IM1JM1K = pcent(J, VAC, SEM, VSINT, NP)
+                        DELXSII = DELXSI[I]
+                        DELXSIIP1 = DELXSI[I+1]
+                        DELXSI2 = DELXSI[I+1] + DELXSI[I]
+                    elif I == NR - 1:
+                        VAC_IP1JK = IBC * VAC[0, I, J, K]
+                        VAC_IM1JK = VAC[0, I-1, J, K]
+                        VAC_IP1JP1K = IBC * VAC[0, I, J+1, K]
+                        VAC_IM1JP1K = VAC[0, I-1, J+1, K]
+                        DELXSII = DELXSI[I]
+                        DELXSIIP1 = DELXSI[I]
+                        DELXSI2 = DELXSI[I] + DELXSI[I]
+                    else:
+                        VAC_IP1JK = VAC[0, I+1, J, K]
+                        VAC_IM1JK = VAC[0, I-1, J, K]
+                        VAC_IP1JP1K = VAC[0, I+1, J+1, K]
+                        VAC_IM1JP1K = VAC[0, I-1, J+1, K]
+                        DELXSII = DELXSI[I]
+                        DELXSIIP1 = DELXSI[I+1]
+                        DELXSI2 = DELXSI[I+1] + DELXSI[I]
 
-                    temp = (t1 * 2.0 * (vac_ip1jk + vac_im1jk) / (delr_i + delr_ip1) +
-                            t2 * (VAC[0, i, j + 1, k] + VAC[0, i, j - 1, k]) / (dels_j ** 2) +
-                            t3 * (vac_ijkp1 + vac_ijkm1) / (DELP ** 2) +
-                            t4 * (vac_ip1jk - vac_im1jk) / (delr_i) +
-                            t5 * (vac_ip1jk - vac_im1jk) / (delr_i) +
-                            t6 * (VAC[0, i, j + 1, k] - VAC[0, i, j - 1, k]) / (2.0 * dels_j))
+                    if K == 0:
+                        VAC_IJKP1 = VAC[0, I, J, K+1]
+                        if MIRROR == 1:
+                            VAC_IJKM1 = VAC[0, I, J, 0]
+                        else:
+                            VAC_IJKM1 = VAC[0, I, J, NP-1]
+                    elif K == NP - 1:
+                        if MIRROR == 1:
+                            VAC_IJKP1 = VAC[0, I, J, NP-1]
+                        else:
+                            VAC_IJKP1 = VAC[0, I, J, 0]
+                        VAC_IJKM1 = VAC[0, I, J, K-1]
+                    else:
+                        VAC_IJKP1 = VAC[0, I, J, K+1]
+                        VAC_IJKM1 = VAC[0, I, J, K-1]
 
-                    VAC[1, i, j, k] = temp / (2.0 * t1 * (1.0 / delr_i) / (delr_i) +
-                                              2.0 * t2 / (dels_j ** 2) + 2.0 * t3 / (DELP ** 2))
+                    TEMP = (
+                        T1 * 2.0 * (VAC_IP1JK / DELXSIIP1 + VAC_IM1JK / DELXSII) / DELXSI2 +
+                        T2 * (VAC[0, I, J+1, K] + VAC_IJM1K) / DELETA ** 2 +
+                        T3 * (VAC_IJKP1 + VAC_IJKM1) / DELP ** 2 +
+                        T4 * (VAC_IP1JP1K - VAC_IM1JP1K - VAC_IP1JM1K + VAC_IM1JM1K) / (DELXSI2 * DELETA) +
+                        T5 * (VAC_IP1JK - VAC_IM1JK) / DELXSI2 +
+                        T6 * (VAC[0, I, J+1, K] - VAC_IJM1K) / (2.0 * DELETA)
+                    )
 
-        for k in range(NP):
-            for j in range(NV):
-                for i in range(NR):
-                    VAC[0, i, j, k] = VAC[1, i, j, k]
+                    VAC[1, I, J, K] = TEMP / (
+                        2.0 * T1 * (1.0 / DELXSIIP1 + 1.0 / DELXSII) / DELXSI2 +
+                        2.0 * T2 / DELETA ** 2 + 2.0 * T3 / DELP ** 2
+                    )
 
-        for k in range(NP):
-            for i in range(NR):
-                x = R[i] * np.cos((k - 0.5) * DELP)
-                y = R[i] * np.sin((k - 0.5) * DELP)
-                surf_old = VSINT[0, i, k]
-                if TIP[i, 3, k]:
+        for K in range(NP):
+            for J in range(NV):
+                for I in range(NR):
+                    VAC[0, I, J, K] = VAC[1, I, J, K]
+
+        for K in range(NP):
+            for I in range(NR):
+                X = R[I] * np.cos((K - 0.5) * DELP)
+                Y = R[I] * np.sin((K - 0.5) * DELP)
+                SURF_OLD = VSINT[0, I, K]
+                if TIP[I, 2, K]:
                     continue
-                stemp = ((3.0 * VAC[0, i, 0, k] - (9.0 / 6.0) * VAC[0, i, 1, k] + (1.0 / 3.0) * VAC[0, i, 2, k]) / (DELV[i] + 1e-10) +
-                         EPSILON * (3.75 * SEM[0, i, 0, k] - (5.0 / 6.0) * SEM[0, i, 1, k] + 0.15 * SEM[0, i, 2, k]) / (DELS[0] + 1e-10))
-                denom = ((11.0 / 6.0) / (DELV[i] + 1e-10) + (46.0 / 15.0) * EPSILON / (DELS[0] + 1e-10))
-                rho = rhosurf(VSINT[0, i, k])
-                temp = stemp - rho * EEP * 1e7
-                surf_new = temp / denom
-                del_surf = max(1e-6, abs(BIAS) / 1e6)
+                if TIP[I, 1, K]:
+                    STEMP = (
+                        (2.0 * VAC[0, I, 0, K] - 0.5 * VAC[0, I, 1, K]) / DELV[I] +
+                        EPSIL * (3.75 * SEM[0, I, 0, K] - (5.0 / 6.0) * SEM[0, I, 1, K] +
+                                 0.15 * SEM[0, I, 2, K]) / DELS0
+                    )
+                    DENOM = 1.5 / DELV[I] + (46.0 / 15.0) * EPSIL / DELS0
+                else:
+                    STEMP = (
+                        VAC[0, I, 0, K] / DELV[I] +
+                        EPSIL * (3.75 * SEM[0, I, 0, K] - (5.0 / 6.0) * SEM[0, I, 1, K] +
+                                 0.15 * SEM[0, I, 2, K]) / DELS0
+                    )
+                    DENOM = 1.0 / DELV[I] + (46.0 / 15.0) * EPSIL / DELS0
 
-                surf_new = gsect(surfmin, surf_old, surf_new, del_surf, EPSILON, EEP, x, y, S[i], stemp, denom, EPSILON_SURFACE)
+                VSINT[1, I, K] = STEMP / DENOM
 
-                # Apply damping factor to prevent divergence
-                surf_new = damping_factor * surf_new + (1 - damping_factor) * surf_old
-                # Limit the surface potential to prevent divergence
-                surf_new = min(max(surf_new, -MAX_POTENTIAL), MAX_POTENTIAL)
+        # Print the iteration number and pot0 value
+        POT0 = np.mean(VSINT[1])*589.00
+        print(f"ITER, POT0 = {ITER}, {POT0:.20f}")
 
-                VSINT[1, i, k] = surf_new
+        # 強制在500次迭代後停止
+        if ITER >= 499:
+            
+            return POT0, IERR, ITER,VAC,VSINT,SEM
 
-        for k in range(NP):
-            for i in range(NR):
-                VSINT[0, i, k] = VSINT[1, i, k]
+    return POT0, IERR, ITER
 
-        for k in range(NP):
-            for j in range(NS):
-                for i in range(NR):
-                    sem_old = SEM[0, i, j, k]
-                    x = R[i] * np.cos((k - 0.5) * DELP)
-                    y = R[i] * np.sin((k - 0.5) * DELP)
-                    if i == 0:
-                        sem_im1jk = pcent(-j, VAC, SEM, VSINT, NP)
-                        sem_ip1jk = SEM[0, i + 1, j, k]
-                    elif i == NR - 1:
-                        sem_im1jk = SEM[0, i - 1, j, k]
-                        sem_ip1jk = SEM[0, i, j, k]
-                    else:
-                        sem_im1jk = SEM[0, i - 1, j, k]
-                        sem_ip1jk = SEM[0, i + 1, j, k]
 
-                    if j == 0:
-                        sem_ijp1k = SEM[0, i, j + 1, k]
-                        sem_ijm1k = VSINT[0, i, k]
-                    elif j == NS - 1:
-                        sem_ijp1k = SEM[0, i, j, k]
-                        sem_ijm1k = SEM[0, i, j - 1, k]
-                    else:
-                        sem_ijp1k = SEM[0, i, j + 1, k]
-                        sem_ijm1k = SEM[0, i, j - 1, k]
-
-                    if k == 0:
-                        sem_ijkp1 = SEM[0, i, j, k + 1]
-                        sem_ijkm1 = SEM[0, i, j, NP - 1]
-                    elif k == NP - 1:
-                        sem_ijkp1 = SEM[0, i, j, 0]
-                        sem_ijkm1 = SEM[0, i, j, k - 1]
-                    else:
-                        sem_ijkp1 = SEM[0, i, j, k + 1]
-                        sem_ijkm1 = SEM[0, i, j, k - 1]
-
-                    delr_i = max(DELXSI[i], SMALL_VALUE)
-                    delr_ip1 = max(DELXSI[i + 1], SMALL_VALUE)
-                    dels_j = max(DELETA, SMALL_VALUE)
-                    dels_jp1 = max(DELETA, SMALL_VALUE)
-
-                    stemp = (2.0 * (sem_ip1jk / delr_ip1 + sem_im1jk / delr_i) / (delr_ip1 + delr_i + 1e-10) +
-                             2.0 * (sem_ijp1k / dels_jp1 + sem_ijm1k / dels_j) / (dels_jp1 + dels_j + 1e-10) +
-                             np.nan_to_num((sem_ip1jk - sem_im1jk) / (R[i] * (delr_ip1 + delr_i) + 1e-10), nan=0.0, posinf=0.0, neginf=0.0) +
-                             np.nan_to_num((sem_ijkp1 + sem_ijkm1) / (R[i] ** 2 * DELP ** 2 + 1e-10), nan=0.0, posinf=0.0, neginf=0.0))
-
-                    rho = rhobulk(SEM[0, i, j, k], np.float64(1e17))
-                    temp = stemp - rho * EEP / EPSILON
-                    denom = (2.0 * (1.0 / delr_ip1 + 1.0 / delr_i) / (delr_ip1 + delr_i + 1e-10) +
-                             2.0 * (1.0 / dels_jp1 + 1.0 / dels_j) / (dels_jp1 + dels_j + 1e-10) +
-                             2.0 / (R[i] ** 2 * DELP ** 2 + 1e-10))
-                    sem_new = temp / denom
-                    del_sem = max(1e-6, abs(BIAS) / 1e6)
-
-                    sem_new = gsect(semin, sem_old, sem_new, del_sem, EPSILON, EEP, x, y, S[j], stemp, denom, np.float64(1e17))
-
-                    # Apply damping factor to prevent divergence
-                    sem_new = damping_factor * sem_new + (1 - damping_factor) * sem_old
-                    # Limit the SEM potential to prevent divergence
-                    sem_new = min(max(sem_new, -MAX_POTENTIAL), MAX_POTENTIAL)
-
-                    SEM[1, i, j, k] = sem_new
-
-        for k in range(NP):
-            for j in range(NS):
-                for i in range(NR):
-                    SEM[0, i, j, k] = SEM[1, i, j, k]
-
-        # Check for convergence every 100 iterations
-        
-        if iter_count % 100 == 0 and iter != 0:
-            pot_sav2 = pot_sav
-            pot_sav = pot0
-            pot0 = pcent(0, VAC, SEM, VSINT, NP)
-            if IWRIT != 0:
-                print(f"ITER, Pot0 = {iter_count}, {pot0:.50f}")
-
-        # Adjust damping factor to prevent divergence
-        # Increase damping factor slightly to accelerate convergence
-
-        DELXSI *= 100
-        DELS *= 100
-        DELP *= 100
-
-    return pot0, 0, iter_count
 
 def semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, DELR, DELXSI, DELP, 
              NRDIM, NVDIM, NSDIM, NPDIM, NR, NV, NS, NP, BIAS, IWRIT, ITMAX, EP, IPMAX, pot0, ierr, 
@@ -284,7 +276,7 @@ def semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, 
     Z0 = SEP - sprime
     Z0=5.96046448E-08
     C = Z0 / sprime
-    
+    IBC=0
     # Print corrected ETAT, A, Z0, C
     print(f"ETAT, A, Z0, C = {ETAT:.8f}, {A:.8f}, {Z0:.15f}, {C:.15f}")
     DELETA = ETAT / np.float64(NV)
@@ -378,22 +370,18 @@ def semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, 
         ITM = int(ITMAX[ip])
         EPI = EP[ip]
 
-        for iter in range(500):
-            pot0, ierr, iter_count = iter3(VAC, TIP, SEM, VSINT, R, DELR, DELV, DELP, DELXSI, S, DELS, BIAS, A, NR, NV, NS, NP, EPI, ITM, pot0, IWRIT, ETAT, C, MIRROR, EPSILON, DELETA, iter_count)
-            if iter % 100 == 0:
-                print(f"ITER, Pot0 = {iter_count}, {pot0:.20f}")
-
-            # Check for convergence every 100 iterations
-            if iter % 100 == 0 and abs(pot0 - pot_sav) < EPI and abs(pot_sav - pot_sav2) < 2 * EPI:
-                break
-
-            if iter_count >= 200:  # 強制在200次迭代後停止
-                print(f"FORCED STOP AFTER {iter_count} ITERATIONS")
-                return ETAT, A, Z0, C, DELR, DELS, DELV, DELP, NR, NS, NV, NP, pot0, ierr, VAC, SEM, VSINT
         
+        pot0, ierr,iter,VAC,VSINT,SEM = iter3(VAC, TIP, SEM, VSINT, R, DELR, DELV, DELXSI, S, DELS, BIAS,
+              DELR0, DELS0, DELP, DELETA, A, NRDIM, NVDIM, NSDIM, NPDIM, NR, NV, NS, NP,
+              EP, ITMAX, pot0, IWRIT, ETAT, C, MIRROR, ierr, EPSIL, IBC)
+        
+        VAC=abs(VAC*589.0)
+        VSINT=abs(VSINT*589.0)
+        SEM=abs(SEM*589.0)
+        pot0=abs(pot0)
         # Print the number of iterations and band bending at midpoint
-        print(f"NUMBER OF ITERATIONS = {iter_count}")
-        band_bending_midpoint = pcent(0, VAC, SEM, VSINT, NP)
+        print(f"NUMBER OF ITERATIONS = {iter}")
+        band_bending_midpoint = pot0
         print(f"BAND BENDING AT MIDPOINT = {band_bending_midpoint:.8E}")
 
         if ip == 0:

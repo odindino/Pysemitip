@@ -1,4 +1,5 @@
 import numpy as np
+
 def potexpand(IMPOT, SEP, NV, POT0P, S, NS, NSDIM, BARR, NBARR1, BARR2, NBARR2, NVDIM1, NVDIM2, PROF, PROF2, NSDIM2, S2, NS2, VACSTEP, SEMSTEP, JSEM, NEXSEM, NEXVAC, IWRIT):
     # Initialize common variables
     KAPPA = 0.0
@@ -14,6 +15,11 @@ def potexpand(IMPOT, SEP, NV, POT0P, S, NS, NSDIM, BARR, NBARR1, BARR2, NBARR2, 
         print(f'expansion factor for barrier = {NEXPAN}')
     
     NBARR2 = NEXPAN * (NBARR1 - 1) + 1
+
+    # Ensure BARR2 has enough space
+    if len(BARR2) < NBARR2:
+        BARR2 = np.resize(BARR2, NBARR2)
+    
     BARR2[NBARR2 - 1] = BARR[NBARR1 - 1]
     for J in range(NBARR1 - 1, 0, -1):
         B2 = BARR[J]
@@ -55,6 +61,17 @@ def potexpand(IMPOT, SEP, NV, POT0P, S, NS, NSDIM, BARR, NBARR1, BARR2, NBARR2, 
         
         for K in range(1, NEXPAN + 1):
             KK += 1
+            
+            # Ensure JSEM has enough space
+            if len(JSEM) < KK:
+                JSEM = np.resize(JSEM, KK)
+            
+            # Ensure PROF2 and S2 have enough space
+            if len(PROF2) < KK:
+                PROF2 = np.resize(PROF2, KK)
+            if len(S2) < KK:
+                S2 = np.resize(S2, KK)
+            
             if J == 0:
                 JSEM[KK - 1] = J + 1
             else:
@@ -62,7 +79,14 @@ def potexpand(IMPOT, SEP, NV, POT0P, S, NS, NSDIM, BARR, NBARR1, BARR2, NBARR2, 
                     JSEM[KK - 1] = J
                 else:
                     JSEM[KK - 1] = J + 1
-            NEXSEM[JSEM[KK - 1] - 1] += 1
+            
+            # Ensure NEXSEM has enough space
+            max_index = JSEM[KK - 1] - 1
+            if len(NEXSEM) <= max_index:
+                NEXSEM = np.resize(NEXSEM, max_index + 1)
+            
+            NEXSEM[max_index] += 1
+            
             if KK > NSDIM2:
                 print('*** ERROR - NSDIM2 TOO SMALL ', KK, NSDIM2)
                 print('PRESS THE ENTER KEY TO EXIT')
@@ -82,5 +106,4 @@ def potexpand(IMPOT, SEP, NV, POT0P, S, NS, NSDIM, BARR, NBARR1, BARR2, NBARR2, 
     NS2 = KK
     if IWRIT > 1:
         print(f'number of expanded points in semiconductor = {NS2}')
-
     return NEXVAC, NBARR2, BARR2, NS2, PROF2, S2

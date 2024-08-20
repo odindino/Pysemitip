@@ -1,6 +1,5 @@
 import numpy as np
 from potexpand import*
-
 # Constants
 C = 26.254  # 1/(eV nm^2)
 RQUANT = 12900.0
@@ -22,28 +21,48 @@ jsem = np.zeros(ns2, dtype=int)
 psivac = np.zeros(nbarr2)
 psisem = np.zeros(ns2)
 
-def atand(x):
-    return np.degrees(np.arctan(x))
+def fd(ener, ef, tk):
+    """Fermi-Dirac分布函数"""
+    ener = np.float64(ener)
+    ef = np.float64(ef)
+    tk = np.float64(tk)
+    
+    # Boltzmann常數 (eV/K)
+    k_b = np.float64(8.617e-5)
+    
+    # 計算 exp((ener - ef) / (k_b * tk))，並避免溢出
+    exponent = (ener - ef) / (k_b * tk)
+    
+    # 如果 exponent 非常大，意味著 Fermi-Dirac 分布趨近於 0，避免溢出
+    if exponent > 100:
+        return np.float64(0.0)
+    # 如果 exponent 非常小，意味著 Fermi-Dirac 分布趨近於 1
+    elif exponent < -100:
+        return np.float64(1.0)
+    else:
+        return np.float64(1.0) / (np.exp(exponent) + np.float64(1.0))
 
-def fd(e, ef, tk):
-    """Fermi-Dirac distribution."""
-    k_boltz = 8.617333262145e-5  # Boltzmann constant in eV/K
-    return 1.0 / (1.0 + np.exp((e - ef) / (k_boltz * tk)))
+
 
 def vbcurr(impot, barr, nbarr1, s, prof, nsp, nsdim, nvdim, nv, nvdim1, nsdim2, nvdim2, sep, pot0, expani, pmax, effm, tk1, tk2, bias, ef, nee, nwk, nloc, ev, eftip, e2band, lun, cdesem, cdesurf, cdlsem, cdlsurf, cdevac, cdlvac, currv, currv0, iwrit, icomp, vbprof):
+    ev = 0  # Valence band edge energy in eV (approximate value for GaAs)
+    effm = 0.0635  # Effective mass of electrons in GaAs (relative to electron mass
     """VB Tunnel Current"""
-    nwk=1
-    nee=1
-    expani=1
-    kappa = 0.0
     wkftip = np.sqrt(C * eftip)
-    sum1 = sum2 = sum1s = sum2s = sum1p = sum2p = 0.0
-    currv = 0.0
-    currv0 = 0.0
-    nwk=1
-    nee=1
-    expani=1
-    emax = ev
+    nwk = 20
+    nee = np.int64(20)  # 增加积分的能量步数
+    expani = np.int64(20)  # 增加波函数积分的步数
+    sum1 = np.float64(0.0)
+    currv = np.float64(0.0)
+    currv0 = np.float64(0.0)
+    emax = np.float64(ev)
+    nbarr2 = 100 
+    ns2 = 50      
+    prof2 = np.zeros(ns2)  
+    barr2 = np.zeros(nbarr2)
+    nexsem = np.zeros(10, dtype=int)
+    nexvac = np.zeros(10, dtype=int)
+    s2 = np.linspace(0, 1, ns2)
     if nwk != 1:
         emin = min(ef - 10.0 * tk1, ef + bias - 10.0 * tk2)
     else:
@@ -51,31 +70,30 @@ def vbcurr(impot, barr, nbarr1, s, prof, nsp, nsdim, nvdim, nv, nvdim1, nsdim2, 
     dele = (emax - emin) / nee
     if dele <= 0:
         return currv, currv0
-
+    
     wkmax = np.sqrt(C * effm * (emax - emin))
     if wkmax == 0:
-        return currv, currv0  # Avoid division by zero
+        return currv, currv0  # 避免除零错误
 
     semstep = (2.0 * PI / wkmax) / expani
     kappa = np.sqrt(C * max(barr[nbarr1 - 1], barr[0]) - emin)
     if kappa == 0:
-        return currv, currv0  # Avoid division by zero
+        return currv, currv0  # 避免除零错误
 
     vacstep = (2.0 * PI / kappa) / expani
     pot0p = pot0 + vbprof[0]
-    
-    potexpand(impot, sep, nv, pot0p, s, nsp, nsdim, barr, nbarr1, barr2, nbarr2, nvdim1, nvdim2, vbprof, prof2, nsdim2, s2, ns2, vacstep, semstep, jsem, nexsem, nexvac, iwrit)
-    
-    delvac = sep / float(nbarr2 - 1)
-    delwk = wkmax / nwk
 
+    nexvac, nbarr2, barr2, ns2, prof2, s2=potexpand(impot, sep, nv, pot0p, s, nsp, nsdim, barr, nbarr1, barr2, nbarr2, nvdim1, nvdim2, vbprof, prof2, nsdim2, s2, ns2, vacstep, semstep, jsem, nexsem, nexvac, iwrit)
+    
+    delvac = sep / np.float64(nbarr2 - 1)
+    delwk = wkmax / nwk
     for iwky in range(nwk):
         wky = iwky * delwk
         for iwkx in range(nwk):
             wkx = iwkx * delwk
             wkparr = np.sqrt(wkx ** 2 + wky ** 2)
             eparr = wkparr ** 2 / (effm * C)
-            nwkdeg = 8
+            nwkdeg = np.int64(8)
             if iwkx == 0:
                 nwkdeg /= 2
             if iwky == 0:
@@ -88,10 +106,10 @@ def vbcurr(impot, barr, nbarr1, s, prof, nsp, nsdim, nvdim, nv, nvdim1, nsdim2, 
                 ener = emax - (ie - 0.5) * dele
                 if eparr >= (emax - ener):
                     continue
-                occtip = fd(ener - bias, ef, tk2)
-                occsem = fd(ener, ef, tk1)
+                occtip = fd(np.float64(ener - bias), np.float64(ef), np.float64(tk2))
+                occsem = fd(np.float64(ener), np.float64(ef), np.float64(tk1))
                 occdiff = occtip - occsem
-                wf, wfderiv, wksem = vbwf(impot, 0.0, 0.0, 0.0, ener, wkparr, sep, bias, barr2, nvdim2, nbarr2, prof2, ns2, nsdim2, s2, effm, ev, e2band, np.zeros(nvdim2), np.zeros(nsdim2))
+                wf, wfderiv, wksem, psivac, psisem = vbwf(impot, ener, wkparr, sep, bias, barr2, nvdim2, nbarr2, prof2, ns2, nsdim2, s2, effm, ev, e2band)
                 if iwkx == 0 and iwky == 0 and iwrit >= 4:
                     for j in range(nbarr2 - 1, -1, -1):
                         print(-(j - 1) * delvac, psivac[j])
@@ -99,19 +117,14 @@ def vbcurr(impot, barr, nbarr1, s, prof, nsp, nsdim, nvdim, nv, nvdim1, nsdim2, 
                         print(s2[j], psisem[j])
 
                 if icomp == 1:
-                    if ie == 1:
-                        sum3 = 0.0
-                        for ieocc in range(ie, nee + 1):
-                            enerocc = emax - ieocc * dele
-                            occsem2 = 1.0 - fd(enerocc, ef, tk1)
-                            sum3 += occsem2
-                    else:
-                        enerocc = emax - (ie - 1) * dele
+                    sum3 = np.float64(0.0)
+                    for ieocc in range(ie, nee + 1):
+                        enerocc = emax - ieocc * dele
                         occsem2 = 1.0 - fd(enerocc, ef, tk1)
-                        sum3 -= occsem2
+                        sum3 += occsem2
                     occint = sum3 * dele
                     cmult = occint * (effm * C / (2.0 * PI)) * (dele * effm * C / (2.0 * PI * wksem))
-                    sum2 = 0.0
+                    sum2 = np.float64(0.0)
                     for j in range(nbarr2 - 1, -1, -1):
                         tmp = (psivac[j]) ** 2 * cmult
                         if (j - 1) % nexvac == 0:
@@ -129,26 +142,20 @@ def vbcurr(impot, barr, nbarr1, s, prof, nsp, nsdim, nvdim, nv, nvdim1, nsdim2, 
                         else:
                             print('ERROR , INTCURR - J=0')
                             input()
-
                 eperp = ener - wkparr ** 2 / C
-                kappa = np.sqrt(C * (barr2[nbarr2 - 1] - eperp))
+                kappa = np.sqrt(np.abs(C * (barr2[nbarr2 - 1] - eperp)))
                 trans = 2.0 * nwkdeg * (2.0 * wf) ** 2 * wkftip / (wksem / effm)
                 sum1 += trans * occdiff
-
+    print("sum1",sum1)
     currv = sum1 * dele * delwk ** 2 / (4.0 * PI ** 2 * RQUANT)
 
     # Localized States
     if pmax <= ev:
         return currv, currv0
     emax = pmax
-    if nwk != 1:
-        emin = max(ev, min(ef - 10.0 * tk1, ef + bias - 10.0 * tk2))
-    else:
-        emin = max(ev, ef - 10.0 * tk1)
+    emin = max(ev, ef - 10.0 * tk1)
     dele = (emax - emin) / nee
-    emin2 = ef - 10.0 * tk1
-    dele2 = (emax - emin2) / nee
-    sum1 = 0.0
+    sum1 = np.float64(0.0)
     if dele <= 0:
         return currv, currv0
 
@@ -163,21 +170,20 @@ def vbcurr(impot, barr, nbarr1, s, prof, nsp, nsdim, nvdim, nv, nvdim1, nsdim2, 
 
     vacstep = (2.0 * PI / kappa) / expani
     pot0p = pot0 + vbprof[0]
-    
+
     potexpand(impot, sep, nv, pot0p, s, nsp, nsdim, barr, nbarr1, barr2, nbarr2, nvdim1, nvdim2, vbprof, prof2, nsdim2, s2, ns2, vacstep, semstep, jsem, nexsem, nexvac, iwrit)
 
-    delvac = sep / float(nbarr2 - 1)
+    delvac = sep / np.float64(nbarr2 - 1)
     delwk = wkmax / nwk
-
     for iwky in range(nwk):
         wky = iwky * delwk
         for iwkx in range(nwk):
             wkx = iwkx * delwk
             wkparr = np.sqrt(wkx ** 2 + wky ** 2)
             eparr = wkparr ** 2 / (effm * C)
-            n = 0
-            nsav = 0
-            nwkdeg = 8
+            n = np.int64(0)
+            nsav = np.int64(0)
+            nwkdeg = np.int64(8)
             if iwkx == 0:
                 nwkdeg /= 2
             if iwky == 0:
@@ -193,11 +199,11 @@ def vbcurr(impot, barr, nbarr1, s, prof, nsp, nsdim, nvdim, nv, nvdim1, nsdim2, 
                 occtip = fd(ener - bias, ef, tk2)
                 occsem = fd(ener, ef, tk1)
                 occdiff = occtip - occsem
-                n, wf, wfderiv = vbloc(impot, n, 0.0, 0.0, ener, wkparr, sep, bias, barr2, nvdim2, nbarr2, prof2, ns2, nsdim2, s2, effm, ev, e2band, np.zeros(nvdim2), np.zeros(nsdim2))
+                n, wf, wfderiv = vbloc(impot, n, np.float64(0.0), np.float64(0.0), ener, wkparr, sep, bias, barr2, nvdim2, nbarr2, prof2, ns2, nsdim2, s2, effm, ev, e2band, np.zeros(nvdim2, dtype=np.float64), np.zeros(nsdim2, dtype=np.float64))
                 if n == nsav:
                     continue
                 if iwkx == 0 and iwky == 0:
-                    if psisem[0] != 0.0:
+                    if psisem[0] != np.float64(0.0):
                         nloc[0] = nloc[0] + 1
                         if iwrit > 1:
                             print('VB localized state at energy ', ener)
@@ -210,19 +216,18 @@ def vbcurr(impot, barr, nbarr1, s, prof, nsp, nsdim, nvdim, nv, nvdim1, nsdim2, 
                                 print(s2[j], psisem[j])
 
                         if icomp == 1:
-                            occint = max(0.0, (ener - ef))
-                            if tk1 != 0.0:
-                                sum2 = 0.0
+                            occint = max(np.float64(0.0), (ener - ef))
+                            if tk1 != np.float64(0.0):
+                                sum2 = np.float64(0.0)
                                 for ieocc in range(1, nee + 1):
-                                    enerocc = ener - (ieocc - 0.5) * dele2
-                                    if enerocc < emin2:
+                                    enerocc = ener - (ieocc - 0.5) * dele
+                                    if enerocc < ef - 10.0 * tk1:
                                         break
                                     occsem2 = 1.0 - fd(enerocc, ef, tk1)
                                     sum2 += occsem2
-                                sum2 *= dele2
-                                occint = sum2
+                                occint = sum2 * dele
                             cmult = occint * (effm * C / (2.0 * PI))
-                            sum2 = 0.0
+                            sum2 = np.float64(0.0)
                             for j in range(nbarr2 - 1, -1, -1):
                                 tmp = (psivac[j]) ** 2 * cmult
                                 if (j - 1) % nexvac == 0:
@@ -255,89 +260,98 @@ def vbcurr(impot, barr, nbarr1, s, prof, nsp, nsdim, nvdim, nv, nvdim1, nsdim2, 
     
     return currv, currv0
 
+def vbwf(impot, e, wkparr, sep, bias, barr2, nvdim2, nbarr2, prof2, ns2, nsdim2, s2, effm, ev, e2band):
+    # C 是 2m/hbar^2 在1/(eV nm^2)單位
+    C = 26.254
+    pi = 4.0 * np.arctan(1.0)
 
-def vbwf(impot, wf, wfderiv, wksem, e, wkparr, sep, bias, barr2, nvdim2, nbarr2, prof2, ns2, nsdim2, s2, effm, ev, e2band, psivac, psisem):
-    """Integrate valence band wavefunction from tip across to sample, return values of wf and derivative of wf at tip surface."""
+    # 初始化
     wf = 0.0
     wfderiv = 0.0
     wksem = 1.0
-    eperp = e + wkparr ** 2 / (C * effm)
+    eperp = e + wkparr**2 / (C * effm)  # 電子總能量
+
+    # 如果電子能量在價帶之上，則返回
     if eperp >= ev:
-        return wf, wfderiv, wksem
+        return wf, wfderiv, wksem, None, None
+    
+    # 初始條件設置
+    eperp = e - wkparr**2 / C  # 電子能量平行於表面
+    psi = 1.0  # 初始化波函數
+    dpsi = 0.0  # 波函數導數
+    psivac = np.zeros(nvdim2)
+    psivac[nbarr2-1] = psi  # 真空區波函數初始化
+    imin = 0
+    imax = nbarr2 - 1
 
-    # Determine initial conditions for wavefunction
-    eperp = e - wkparr ** 2 / C
-    psi = 1.0
-    psivac[nbarr2 - 1] = psi
-    imin = 1
-    imax = nbarr2
-    if eperp < barr2[0] and eperp < barr2[nbarr2 - 1]:
-        return wf, wfderiv, wksem
+    # 步長縮放因子，確保每一步積分較小，避免快速增長
+    step_scale_factor = 0.0966  # 可以根據需要調整這個值，值越小步長越小
 
-    for i in range(nbarr2):
-        if eperp < barr2[i]:
-            imin = i
-            break
+    # 確保 eperp 在勢壘內
+    if eperp < barr2[0] and eperp < barr2[nbarr2-1]:
+        for i in range(nbarr2):
+            if eperp < barr2[i]:
+                imin = i
+                break
+        for i in range(nbarr2-1, -1, -1):
+            psivac[i] = psi
+            if eperp < barr2[i]:
+                imax = i
+                break
 
-    for i in range(nbarr2 - 1, -1, -1):
-        psivac[i] = psi
-        if eperp < barr2[i]:
-            imax = i
-            break
+        if imax > imin:
+            dpsi = psi * np.sqrt(np.abs(C * (barr2[imax] - eperp)))  # 計算導數
+            wf = psi
+            wfderiv = dpsi
+        else:
+            print('*** error - eperp above vacuum barrier')
+            return wf, wfderiv, wksem, psivac, None
 
-    if imax > imin:
-        return wf, wfderiv, wksem
-
-    dpsi = psi * np.sqrt(C * (barr2[imax - 1] - eperp))
-    wf = psi
-    wfderiv = dpsi
-
-    # Integrate through vacuum
-    delvac = sep / float(nbarr2 - 1)
-    for i in range(imax - 2, -1, -1):
-        if impot == 1 and (barr2[i] - eperp) <= 0:
+    # 積分通過真空區域，縮小步長 delvac
+    delvac = (sep / float(nbarr2 - 1)) * step_scale_factor  # 步長縮小
+    for i in range(imax-1, 0, -1):
+        if impot == 1 and (barr2[i] - eperp) <= 0.0:
             continue
-        psi = psi + dpsi * delvac
+        psi += dpsi * delvac
         psivac[i] = psi
-        dpsi = dpsi + C * (barr2[i] - eperp) * psi * delvac
+        dpsi += C * (barr2[i] - eperp) * psi * delvac
 
-    # Match across vacuum-semiconductor interface
-    psi = psi
-    dpsi = dpsi * effm
-
-    # Integrate through semiconductor
-    eperp = e + wkparr ** 2 / (C * effm)
-    psi = psi + dpsi * s2[0]
+    # 積分通過半導體區域，縮小步長 dels
+    psi = psi  # 波函數值
+    dpsi = dpsi * effm  # 波函數導數乘以有效質量
+    eperp = e + wkparr**2 / (C * effm)  # 計算半導體內的電子能量
+    psisem = np.zeros(ns2)
     psisem[0] = psi
-    ebarr = eperp - prof2[0]
-    dpsi = dpsi + C * effm * ebarr * psi * s2[0]
+
     for i in range(1, ns2):
-        dels = s2[i] - s2[i - 1]
-        psi = psi + dpsi * dels
-        if abs(psi) >= 1e100:
-            return 0.0, 0.0, wksem
+        dels = (s2[i] - s2[i-1]) * step_scale_factor  # 步長縮小
+        psi += dpsi * dels
+        if np.abs(psi) >= 1e100:  # 防止數值溢出
+            return wf, wfderiv, wksem, psivac, psisem
+        
         psisem[i] = psi
         ebarr = eperp - prof2[i]
-        dpsi = dpsi + C * effm * ebarr * psi * dels
+        dpsi += C * effm * (ebarr) * psi * dels
 
-    # Determine amplitude, and evaluate across barrier
-    wksem = np.sqrt(C * effm * (ev - eperp))
-    phase = np.arctan(psi * wksem / dpsi)
-    amp = np.sqrt(2.0) * np.sin(phase) / psi
-    wf = wf * amp
-    wfderiv = wfderiv * amp
+    # 計算波函數的振幅與相位
+    wksem = np.sqrt(np.abs(C * effm * (ev - eperp)))  # 計算半導體內的波矢
+    phase = np.arctan(psi * wksem / dpsi)  # 計算波函數相位
+    amp = np.sqrt(2.0) * np.sin(phase) / psi  # 計算波函數振幅
+    wf = wf * amp  # 波函數振幅歸一化
+    wfderiv = wfderiv * amp  # 導數振幅歸一化
 
-    # Normalize wavefunction
-    for i in range(nbarr2 - 1, -1, -1):
-        psivac[i] = psivac[i] * amp
-    for i in range(ns2):
-        psisem[i] = psisem[i] * amp
+    # 正規化波函數
+    psivac *= amp
+    psisem *= amp
 
-    delsmax = s2[ns2 - 1] - s2[ns2 - 2]
-    if delsmax / (2.0 * PI / wksem) > 0.25:
-        print("*** CAUTION *** RATIO OF SEMICOND. STEP SIZE TO WAVELENGTH =", delsmax / (2.0 * PI / wksem))
+    # 檢查步長與波長的合理性
+    delsmax = s2[ns2-1] - s2[ns2-2]
+    if delsmax / (2.0 * pi / wksem) > 0.25:
+        print('*** CAUTION *** RATIO OF SEMICOND. STEP SIZE TO WAVELENGTH =', delsmax / (2.0 * pi / wksem))
 
-    return wf, wfderiv, wksem
+    return wf, wfderiv, wksem, psivac, psisem
+
+
 
 def cbwf(impot, wf, wfderiv, wksem, e, wkparr, sep, bias, barr2, nvdim2, nbarr2, prof2, ns2, nsdim2, s2, effm, ec, e2band, psivac, psisem):
     """Integrate conduction band wavefunction from tip across to sample, return values of wf and derivative of wf at tip surface."""
@@ -729,7 +743,7 @@ def cbcurr(impot, barr, nbarr1, s, prof, nsp, nsdim, nvdim, nv, nvdim1, nsdim2, 
     sum1 = 0.0
     if dele <= 0:
         return currc, currc0
-
+    print(wkmax)
     wkmax = np.sqrt(C * effm * (emax - emin))
     if wkmax == 0:
         return currc, currc0  # Avoid division by zero
@@ -827,7 +841,6 @@ def cbcurr(impot, barr, nbarr1, s, prof, nsp, nsdim, nvdim, nv, nvdim1, nsdim2, 
                 kappa = np.sqrt(C * (barr2[nbarr2 - 1] - eperp))
                 trans = nwkdeg * (n - nsav) * 2.0 * (2.0 * wf) ** 2 * wkftip
                 sum1 += trans * occdiff
-                nsav = n
 
     currc0 = sum1 * delwk ** 2 / (C * 2.0 * PI * RQUANT)
     
@@ -848,12 +861,12 @@ def intcurr(impot, barr, prof, nbarr1, nv, ns, nsp, nvdim, nsdim, s, sep, bias, 
     vbprof = np.zeros(nsdim)
     cbprof = np.zeros(nsdim)
     nexsem = np.zeros(nvdim2, dtype=int)
-
+    tk=300*8.617*1e-5
+ 
     rquant = 12900.0
     pi = 4.0 * np.arctan(1.0)
     tk1 = tk
     tk2 = tk
-
     if icomp == 1:
         cdesurf = 0.0
         cdlsurf = 0.0
@@ -932,7 +945,8 @@ def intcurr(impot, barr, prof, nbarr1, nv, ns, nsp, nvdim, nsdim, s, sep, bias, 
 
     curr = currv + currc
     curr0 = currv0 + currc0
-
+    print(currv)
+    print(currvl, currvh ,currvso)
     return currv, currv0, currc, currc0, curr, curr0
 
 def cbedge(sz):
