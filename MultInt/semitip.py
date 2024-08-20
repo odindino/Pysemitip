@@ -115,7 +115,7 @@ def iter3(VAC, TIP, SEM, VSINT, R, DELR, DELV, DELXSI, S, DELS, BIAS,
     C2P6 = C2 + 6.0
     TC2P2 = 3.0 * C2 + 2.0
 
-    for ITER in range(500):
+    for ITER in range(1000):
         for K in range(NP):
             for I in range(NR):
                 X2M1 = (R[I] / A) ** 2
@@ -258,7 +258,7 @@ def iter3(VAC, TIP, SEM, VSINT, R, DELR, DELV, DELXSI, S, DELS, BIAS,
         print(f"ITER, POT0 = {ITER}, {POT0:.20f}")
 
         # 強制在500次迭代後停止
-        if ITER >= 499:
+        if ITER >= 999:
             
             return POT0, IERR, ITER,VAC,VSINT,SEM
 
