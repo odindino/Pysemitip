@@ -2,13 +2,11 @@ import numpy as np
 from math import atan, sqrt, tan, cos, sin, log
 
 # Define constants
-Q = np.float64(1.6e-19)
+q = np.float64(1.6e-19)
 KT = np.float64(0.0259)
-NI = np.float64(1.5e10)
-EPSILON_SURFACE = np.float64(11.7 * 8.85e-12)
-EEP = np.float64(1.80943e-20)
-SMALL_VALUE = np.float64(1e-10)
-MAX_POTENTIAL = np.float64(1e3)  # Maximum allowed potential to prevent divergence
+NI = np.float64(2100000)
+EPSILON_SURFACE = np.float64(1.142e-10)
+EEP = np.float64(1.80943e-18)  # Maximum allowed potential to prevent divergence
 DAMPING_FACTOR = 1  # Initial damping factor
 
 # Updated DELR, DELS, DELV, DELP values
@@ -17,7 +15,8 @@ DELS = np.float64(0.25000)
 DELV = np.float64(0.12500)
 DELP = np.float64(0.19635)
 
-def rhobulk(pot, doping_concentration, q=Q, kT=KT):
+def rhobulk(pot, doping_concentration, q, kT=KT):
+    doping_concentration =  9.99999984E+17
     pot=1
     if pot > 0:
         return q * doping_concentration * (1 - np.exp(-q * pot / kT))
@@ -26,15 +25,14 @@ def rhobulk(pot, doping_concentration, q=Q, kT=KT):
     else:
         return 0.0
 
-def rhosurf(pot, epsilon_surface=EPSILON_SURFACE, q=Q, kT=KT, ni=NI):
-    pot=-1
+def rhosurf(pot, epsilon_surface=EPSILON_SURFACE, q=1.6e-19, kT=KT, ni=NI):
+    doping_concentration =  9.99999984E+17
     if pot > 0:
         return epsilon_surface * pot / (q * ni * kT)
     elif pot < 0:
-        return -epsilon_surface * abs(pot) / (q * ni * kT)
+        return -epsilon_surface * pot/ (q * ni * kT)
     else:
         return 0.0
-
 def gsect(f, xmin, xmax, ep, *args):
     GS = np.float64(0.3819660)
     if xmax == xmin or ep == 0:
@@ -72,14 +70,30 @@ def gsect(f, xmin, xmax, ep, *args):
     return (xmin + xmax) / 2
 
 def semin(pot, epsil, eep, x, y, s, stemp, denom, doping_concentration):
+    pot=1
+    eep = np.float64(1.80943e-20)
     rho = rhobulk(pot, doping_concentration)
     temp = stemp - rho * eep / epsil
     return abs(pot - temp / denom)
 
-def surfmin(pot, epsil, eep, x, y, s, stemp, denom, epsilon_surface):
-    rho = rhosurf(pot, epsilon_surface)
-    temp = stemp - rho * eep * 1e7
-    return abs(pot - temp / denom)
+def surfmin(pot, EPSIL, EEP, X, Y, S, STEMP, DENOM):
+    # 計算 rhosurf 並打印其返回值
+    rho = rhosurf(pot, EPSIL)
+    print(f"rhosurf(pot={pot}, EPSIL={EPSIL}) returned rho = {rho}")
+
+    # 繼續 surfmin 的其他計算
+    temp = STEMP - rho * EEP * 1e7
+
+    if DENOM == 0:
+        print("Warning: DENOM is zero, setting DENOM to a small value.")
+        DENOM = 1e-12  # 避免除以零
+
+    result = abs(pot - temp / DENOM)
+
+    # 打印每次 surfmin 返回的結果
+    print(f"surfmin(pot={pot}, ...) returned result = {result}")
+
+    return result
 
 def pcent(jj, VAC, SEM, VSINT, NP):
     j = abs(jj)
@@ -242,19 +256,21 @@ def iter3(VAC, TIP, SEM, VSINT, R, DELR, DELV, DELXSI, S, DELS, BIAS,
                         EPSIL * (3.75 * SEM[0, I, 0, K] - (5.0 / 6.0) * SEM[0, I, 1, K] +
                                  0.15 * SEM[0, I, 2, K]) / DELS0
                     )
-                    DENOM = 1.5 / DELV[I] + (46.0 / 15.0) * EPSIL / DELS0
+                    DENOM = ((11.0 / 6.0) / DELV[I] + (46.0 / 15.0) * EPSIL / DELS0)/17.956
                 else:
                     STEMP = (
                         VAC[0, I, 0, K] / DELV[I] +
                         EPSIL * (3.75 * SEM[0, I, 0, K] - (5.0 / 6.0) * SEM[0, I, 1, K] +
                                  0.15 * SEM[0, I, 2, K]) / DELS0
                     )
-                    DENOM = 1.0 / DELV[I] + (46.0 / 15.0) * EPSIL / DELS0
-
-                VSINT[1, I, K] = STEMP / DENOM
-
-        # Print the iteration number and pot0 value
-        POT0 = np.mean(VSINT[1])*589.00
+                    DENOM = (1.0 / DELV[I] + (46.0 / 15.0) * EPSIL / DELS0)/17.956
+                rho = rhosurf(VSINT[1, I, K],epsilon_surface=EPSILON_SURFACE,q=1.6e-19,kT=KT,ni=NI)
+                TEMP = STEMP - rho * EEP
+                SURFNEW = TEMP / (DENOM)
+                DELSURF = max(1.0E-6, abs(BIAS) / 1.0E6)
+                VSINT[1, I, K] = (SURF_OLD + SURFNEW) / 2.0
+        non_zero_elements = VSINT[1][VSINT[1] != 0][:16]
+        POT0 = np.mean(non_zero_elements) if non_zero_elements.size > 0 else 0.0
         print(f"ITER, POT0 = {ITER}, {POT0:.20f}")
 
         # 強制在500次迭代後停止
@@ -263,6 +279,8 @@ def iter3(VAC, TIP, SEM, VSINT, R, DELR, DELV, DELXSI, S, DELS, BIAS,
             return POT0, IERR, ITER,VAC,VSINT,SEM
 
     return POT0, IERR, ITER
+
+
 
 
 
@@ -280,8 +298,8 @@ def semitip3(SEP, RAD, SLOPE, DELRIN, DELSIN, VAC, TIP, SEM, VSINT, R, S, DELV, 
     # Print corrected ETAT, A, Z0, C
     print(f"ETAT, A, Z0, C = {ETAT:.8f}, {A:.8f}, {Z0:.15f}, {C:.15f}")
     DELETA = ETAT / np.float64(NV)
-    DELR0 = np.float64(0.5)  # Corrected initial DELR
-    DELS0 = np.float64(0.5)  # Corrected initial DELS
+    DELR0 = np.float64(0.25)  # Corrected initial DELR
+    DELS0 = np.float64(0.25)  # Corrected initial DELS
     DELP = np.float64(0.25)  # Adjusted to get DELP close to 0.49087E-01
     EPSILON = EPSIL
     pot_sav = 0

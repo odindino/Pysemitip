@@ -285,7 +285,7 @@ def vbwf(impot, e, wkparr, sep, bias, barr2, nvdim2, nbarr2, prof2, ns2, nsdim2,
     imax = nbarr2 - 1
 
     # 步長縮放因子，確保每一步積分較小，避免快速增長
-    step_scale_factor = 0.0966  # 可以根據需要調整這個值，值越小步長越小
+    step_scale_factor = 0.1013  # 可以根據需要調整這個值，值越小步長越小
 
     # 確保 eperp 在勢壘內
     if eperp < barr2[0] and eperp < barr2[nbarr2-1]:
