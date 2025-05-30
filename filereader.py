@@ -131,7 +131,6 @@ class YamlConfigReader:
             # 如果直接轉換失敗，可能需要更複雜的轉換邏輯
             logger.warning(f"直接轉換失敗，使用手動轉換: {e}")
             return self._manual_yaml_to_config(yaml_data)
-    
     def _manual_yaml_to_config(self, yaml_data: Dict[str, Any]) -> SemitipConfig:
         """
         手動轉換 YAML 資料為配置物件（當自動轉換失敗時使用）
@@ -147,24 +146,48 @@ class YamlConfigReader:
             SurfaceDistribution, SurfaceRegion, GridConfig,
             ComputationConfig, VoltageScanConfig, MultIntConfig, MultPlaneConfig
         )
-          # 處理 tip 配置
-        tip_data = yaml_data.get('tip', {})
-        tip_config = TipConfig(**tip_data) if tip_data else TipConfig()
         
-        # 處理半導體區域
+        # 處理環境參數
+        environment_data = yaml_data.get('environment', {})
+        temperature = environment_data.get('temperature', yaml_data.get('temperature', 300.0))
+        dielectric_constant = environment_data.get('dielectric_constant', yaml_data.get('dielectric_constant', 12.9))
+        
+        # 處理 tip 配置 (支援新的 position 結構)
+        tip_data = yaml_data.get('tip', {})
+        if tip_data:
+            tip_copy = tip_data.copy()
+            # 處理 position 結構轉換
+            if 'position' in tip_copy:
+                position = tip_copy.pop('position')
+                tip_copy['x_position'] = position.get('x', 0.0)
+                tip_copy['y_position'] = position.get('y', 0.0)
+            tip_config = TipConfig(**tip_copy)
+        else:
+            tip_config = TipConfig()        
+        # 處理半導體區域 (支援新的階層結構)
         semiconductor_regions = []
-        for region_data in yaml_data.get('semiconductor_regions', []):
+        semiconductor_data = yaml_data.get('semiconductor', {})
+        regions_data = semiconductor_data.get('regions', yaml_data.get('semiconductor_regions', []))
+        
+        for region_data in regions_data:
             # 處理區域內的有效質量
             region_copy = region_data.copy()
             if 'effective_mass' in region_copy:
                 effective_mass_data = region_copy['effective_mass']
                 region_copy['effective_mass'] = EffectiveMass(**effective_mass_data)
             semiconductor_regions.append(SemiconductorRegion(**region_copy))
-          # 處理表面區域
+        
+        # 處理電子親和力 (新結構在 semiconductor 中，舊結構在根層級)
+        electron_affinity = semiconductor_data.get('electron_affinity', yaml_data.get('electron_affinity', 4.07))
+        
+        # 處理表面區域 (支援新的階層結構)
         surface_regions = []
-        for surface_data in yaml_data.get('surface_regions', []):
+        surface_data = yaml_data.get('surface', {})
+        surface_regions_data = surface_data.get('regions', yaml_data.get('surface_regions', []))
+        
+        for surface_region_data in surface_regions_data:
             # 處理 first_distribution 和 second_distribution
-            surface_copy = surface_data.copy()
+            surface_copy = surface_region_data.copy()
             
             if 'first_distribution' in surface_copy:
                 first_dist_data = surface_copy['first_distribution']
@@ -176,6 +199,10 @@ class YamlConfigReader:
                 
             surface_regions.append(SurfaceRegion(**surface_copy))
         
+        # 處理表面溫度相依性 (新結構在 surface 中，舊結構在根層級)
+        surface_temperature_dependence = surface_data.get('temperature_dependence', 
+                                                         yaml_data.get('surface_temperature_dependence', False))
+        
         # 處理網格配置
         grid_data = yaml_data.get('grid', {})
         grid_config = GridConfig(**grid_data) if grid_data else GridConfig()
@@ -183,43 +210,51 @@ class YamlConfigReader:
         # 處理計算配置
         computation_data = yaml_data.get('computation', {})
         computation_config = ComputationConfig(**computation_data) if computation_data else ComputationConfig()
-        
-        # 處理電壓掃描配置
+          # 處理電壓掃描配置
         voltage_scan_data = yaml_data.get('voltage_scan', {})
         voltage_scan_config = VoltageScanConfig(**voltage_scan_data) if voltage_scan_data else VoltageScanConfig()
-          # 處理特定配置
-        multint_data = yaml_data.get('multint_config', {})
+        
+        # 處理特定配置 (支援新的命名)
+        multint_data = yaml_data.get('multint_specific', yaml_data.get('multint_config', {}))
         multint_config = MultIntConfig(**multint_data) if multint_data else None
         
-        multplane_data = yaml_data.get('multplane_config', {})
+        multplane_data = yaml_data.get('multplane_specific', yaml_data.get('multplane_config', {}))
         multplane_config = MultPlaneConfig(**multplane_data) if multplane_data else None
+        
+        # 處理輸出設定 (支援新的階層結構)
+        output_data = yaml_data.get('output', {})
+        output_basic = output_data.get('basic_output', yaml_data.get('output_basic', True))
+        output_contours = output_data.get('equipotential_contours', yaml_data.get('output_contours', False))
+        output_full_potential = output_data.get('full_potential', yaml_data.get('output_full_potential', False))
+        num_contours = output_data.get('num_contours', yaml_data.get('num_contours', 6))
+        contour_spacing = output_data.get('contour_spacing', yaml_data.get('contour_spacing', 0.0))
+        contour_angle = output_data.get('contour_angle', yaml_data.get('contour_angle', 0.0))
         
         # 創建主配置物件
         config_args = {
             'version': yaml_data.get('version', '1.0'),
             'simulation_type': yaml_data.get('simulation_type', 'MultInt'),
-            'temperature': yaml_data.get('temperature', 300.0),
-            'dielectric_constant': yaml_data.get('dielectric_constant', 12.9),
+            'temperature': temperature,
+            'dielectric_constant': dielectric_constant,
             'tip': tip_config,
             'semiconductor_regions': semiconductor_regions,
             'surface_regions': surface_regions,
             'grid': grid_config,
             'computation': computation_config,
             'voltage_scan': voltage_scan_config,
-            'electron_affinity': yaml_data.get('electron_affinity', 4.07),
-            'surface_temperature_dependence': yaml_data.get('surface_temperature_dependence', False),
-            'output_basic': yaml_data.get('output_basic', True),
-            'output_contours': yaml_data.get('output_contours', False),
-            'output_full_potential': yaml_data.get('output_full_potential', False),
-            'num_contours': yaml_data.get('num_contours', 6),
-            'contour_spacing': yaml_data.get('contour_spacing', 0.0),
-            'contour_angle': yaml_data.get('contour_angle', 0.0),
+            'electron_affinity': electron_affinity,
+            'surface_temperature_dependence': surface_temperature_dependence,
+            'output_basic': output_basic,
+            'output_contours': output_contours,
+            'output_full_potential': output_full_potential,
+            'num_contours': num_contours,
+            'contour_spacing': contour_spacing,
+            'contour_angle': contour_angle,
             'multint_config': multint_config,
             'multplane_config': multplane_config
         }
         
         return SemitipConfig(**config_args)
-    
     def _config_to_yaml(self, config: SemitipConfig) -> Dict[str, Any]:
         """
         將配置物件轉換為 YAML 格式的字典
@@ -232,10 +267,28 @@ class YamlConfigReader:
         """
         result = {}
         
-        # 處理 tip 配置
+        # 基本資訊
+        result['version'] = config.version
+        result['simulation_type'] = config.simulation_type
+        
+        # 環境設定
+        result['environment'] = {
+            'temperature': config.temperature,
+            'dielectric_constant': config.dielectric_constant
+        }
+        
+        # 處理 tip 配置 (轉換回 position 結構)
         if config.tip:
-            result['tip'] = self._dataclass_to_dict(config.tip)
-          # 處理半導體區域
+            tip_dict = self._dataclass_to_dict(config.tip)
+            # 將 x_position, y_position 轉換為 position 結構
+            if 'x_position' in tip_dict or 'y_position' in tip_dict:
+                tip_dict['position'] = {
+                    'x': tip_dict.pop('x_position', 0.0),
+                    'y': tip_dict.pop('y_position', 0.0)
+                }
+            result['tip'] = tip_dict
+        
+        # 處理半導體區域 (新階層結構)
         if config.semiconductor_regions:
             semiconductor_regions = []
             for region in config.semiconductor_regions:
@@ -243,8 +296,13 @@ class YamlConfigReader:
                 if region.effective_mass:
                     region_dict['effective_mass'] = self._dataclass_to_dict(region.effective_mass)
                 semiconductor_regions.append(region_dict)
-            result['semiconductor_regions'] = semiconductor_regions
-          # 處理表面區域
+            
+            result['semiconductor'] = {
+                'regions': semiconductor_regions,
+                'electron_affinity': config.electron_affinity
+            }
+        
+        # 處理表面區域 (新階層結構)
         if config.surface_regions:
             surface_regions = []
             for surface in config.surface_regions:
@@ -254,7 +312,11 @@ class YamlConfigReader:
                 if surface.second_distribution:
                     surface_dict['second_distribution'] = self._dataclass_to_dict(surface.second_distribution)
                 surface_regions.append(surface_dict)
-            result['surface_regions'] = surface_regions
+            
+            result['surface'] = {
+                'regions': surface_regions,
+                'temperature_dependence': config.surface_temperature_dependence
+            }
         
         # 處理網格配置
         if config.grid:
@@ -267,12 +329,23 @@ class YamlConfigReader:
         # 處理電壓掃描配置
         if config.voltage_scan:
             result['voltage_scan'] = self._dataclass_to_dict(config.voltage_scan)
-          # 處理特定配置
+        
+        # 處理特定配置 (使用新的命名)
         if config.multint_config:
-            result['multint_config'] = self._dataclass_to_dict(config.multint_config)
+            result['multint_specific'] = self._dataclass_to_dict(config.multint_config)
         
         if config.multplane_config:
-            result['multplane_config'] = self._dataclass_to_dict(config.multplane_config)
+            result['multplane_specific'] = self._dataclass_to_dict(config.multplane_config)
+        
+        # 處理輸出設定 (新階層結構)
+        result['output'] = {
+            'basic_output': config.output_basic,
+            'equipotential_contours': config.output_contours,
+            'full_potential': config.output_full_potential,
+            'num_contours': config.num_contours,
+            'contour_spacing': config.contour_spacing,
+            'contour_angle': config.contour_angle
+        }
         
         return result
     
