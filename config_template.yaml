@@ -1,0 +1,113 @@
+# SEMITIP 模擬參數配置檔範例
+# 版本: 1.0
+# 支援的模擬類型: MultInt, MultPlane
+
+version: "1.0"
+simulation_type: "MultInt"  # 可選值: "MultInt", "MultPlane"
+
+# 基本環境設定
+environment:
+  temperature: 300.0  # 溫度 (K)
+  dielectric_constant: 12.9  # 介電常數
+
+# 探針設定
+tip:
+  shank_slope: 1.0  # 探針錐角參數 tan(90-(theta/2))
+  separation: 1.0  # 探針-樣品距離 (nm)
+  radius: 1.0  # 探針半徑 (nm)
+  protrusion_radius: 0.0  # 探針端半球狀突出半徑 (nm)
+  contact_potential: 0.0  # 接觸電位差 (eV)
+  position:
+    x: 0.0  # x 位置 (nm)
+    y: 0.0  # y 位置 (nm)
+  fermi_energy: 8.0  # 探針費米能 (eV)
+
+# 半導體區域設定
+semiconductor:
+  regions:
+    - id: 1
+      donor_concentration: 1.0e18  # 施體濃度 (cm^-3)
+      acceptor_concentration: 0.0  # 受體濃度 (cm^-3)
+      band_gap: 1.42  # 能隙 (eV)
+      valence_band_offset: 0.0  # 價帶偏移 (eV)
+      donor_binding_energy: 0.006  # 施體結合能 (eV)
+      acceptor_binding_energy: 0.028  # 受體結合能 (eV)
+      effective_mass:
+        conduction_band: 0.0635  # 導帶有效質量
+        heavy_hole: 0.643  # 重電洞有效質量
+        light_hole: 0.081  # 輕電洞有效質量
+        split_off_hole: 0.172  # 分裂電洞有效質量
+      spin_orbit_splitting: 0.341  # 自旋軌道分裂 (eV)
+      degeneracy_indicator: 0  # 簡併指標 (0=非簡併, 1=簡併)
+      inversion_indicator: 0  # 反轉指標 (1,2=抑制VB或CB佔據, 3=兩者, 0=無)
+  
+  electron_affinity: 4.07  # 電子親和力 (eV)
+
+# 表面態設定
+surface:
+  regions:
+    - id: 1
+      first_distribution:
+        density: 4.4e14  # 第一分佈密度 (cm^-2 eV^-1)
+        neutrality_level: 0.125  # 電荷中性能級 (eV)
+        fwhm: 0.25  # 高斯分佈半高寬 (eV, 0=均勻分佈)
+        centroid_energy: 1.625  # 高斯分佈中心能量 (eV)
+      second_distribution:
+        density: 0.0  # 第二分佈密度 (cm^-2 eV^-1)
+        neutrality_level: 0.0  # 電荷中性能級 (eV)
+        fwhm: 0.0  # 高斯分佈半高寬 (eV)
+        centroid_energy: 0.0  # 高斯分佈中心能量 (eV)
+  
+  temperature_dependence: false  # 是否包含溫度相依性
+
+# 計算網格設定
+grid:
+  mirror_plane: true  # 是否假設 y=0 鏡面對稱
+  radial_points: 32  # 徑向網格點數 (MultPlane: 32, MultInt: 16)
+  vacuum_points: 16  # 真空區網格點數 (MultPlane: 16, MultInt: 4)
+  semiconductor_points: 32  # 半導體區網格點數 (MultPlane: 32, MultInt: 16)
+  angular_points: 16  # 角度網格點數 (MultPlane: 16, MultInt: 8)
+  initial_grid_size: 0.5  # 初始網格大小參數
+
+# 計算參數
+computation:
+  scaling_steps: 3  # 電位計算的縮放步驟數
+  max_iterations: [80000, 40000, 20000, 10000]  # 每步驟最大迭代次數
+  convergence_parameters: [1.0e-3, 1.0e-3, 1.0e-4, 1.0e-4]  # 收斂參數
+  charge_density_table_size: 20000  # 電荷密度表格大小 (20000=高精度, 5000=低精度)
+
+# 輸出設定
+output:
+  basic_output: true  # 基本輸出
+  equipotential_contours: false  # 等電位線
+  full_potential: false  # 完整電位
+  num_contours: 6  # 等高線數量
+  contour_spacing: 0.0  # 等高線間距 (0=自動計算)
+  contour_angle: 0.0  # 等高線角度 (度)
+
+# 電壓掃描設定
+voltage_scan:
+  points: 41  # 電壓點數
+  start_voltage: -2.0  # 起始電壓 (V)
+  end_voltage: 2.0  # 結束電壓 (V)
+  modulation_voltage: 0.050  # 調變電壓 (V)
+  negative_ramp: 0.0  # V<0 時的 s(V) 斜率 (nm/V)
+  positive_ramp: 0.0  # V>0 時的 s(V) 斜率 (nm/V)
+
+# MultInt 特有參數
+multint_specific:
+  parallel_wavevectors: 20  # 平行波向量數量 (50=高精度, 20=低精度)
+  energy_points: 20  # 能量計算點數 (50=高精度, 20=低精度)
+  expansion_factor: 20  # 薛丁格方程積分擴展因子 (100=高精度, 10=低精度)
+  semiconductor_depth_fraction: 0.75  # 半導體深度積分比例
+
+# MultPlane 特有參數
+multplane_specific:
+  vacuum_width: 2.0  # 真空區總寬度 (nm)
+  vacuum_spacing: 0.05  # 真空中波函數評估間距 (nm)
+  max_energies:  # 最大能量展開 (eV)
+    light_hole: 6.0
+    heavy_hole: 1.8
+    split_off: 4.0
+    conduction_band: 7.5
+  compute_all_bands: false  # 是否計算所有能帶

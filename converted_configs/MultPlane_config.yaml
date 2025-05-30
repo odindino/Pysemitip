@@ -1,0 +1,87 @@
+version: '1.0'
+simulation_type: MultPlane
+temperature: 300.0
+dielectric_constant: 12.9
+
+tip:
+  shank_slope: 1.0
+  separation: 1.0
+  radius: 1.0
+  protrusion_radius: 0.0
+  contact_potential: 0.0
+  x_position: 0.0
+  y_position: 0.0
+  fermi_energy: 8.0  # 使用默認值
+
+electron_affinity: 4.07
+surface_temperature_dependence: false
+
+semiconductor_regions:
+- id: 1
+  donor_concentration: 1.0e+18
+  acceptor_concentration: 0.0
+  band_gap: 1.42
+  valence_band_offset: 0.0
+  donor_binding_energy: 0.006
+  acceptor_binding_energy: 0.028
+  effective_mass:
+    conduction_band: 0.0635
+    heavy_hole: 0.643
+    light_hole: 0.081
+    split_off_hole: 0.172
+  spin_orbit_splitting: 0.341
+  degeneracy_indicator: 0
+  inversion_indicator: 0
+
+surface_regions:
+- id: 1
+  first_distribution:
+    density: 4.4e+14
+    neutrality_level: 0.125
+    fwhm: 0.25
+    centroid_energy: 1.625
+  second_distribution:
+    density: 0.0
+    neutrality_level: 0.0
+    fwhm: 0.0
+    centroid_energy: 0.0
+
+grid:
+  mirror_plane: true
+  radial_points: 32
+  vacuum_points: 16
+  semiconductor_points: 32
+  angular_points: 16
+  initial_grid_size: 0.5
+
+computation:
+  scaling_steps: 3
+  max_iterations: [80000, 40000, 20000, 10000]
+  convergence_parameters: [1.0e-3, 1.0e-3, 1.0e-4, 1.0e-4]
+  charge_density_table_size: 20000
+
+voltage_scan:
+  points: 201
+  start_voltage: -2.5
+  end_voltage: 2.5
+  modulation_voltage: 0.050
+  negative_ramp: 0.0
+  positive_ramp: 0.0
+
+# MultPlane 特有配置
+multplane_config:
+  vacuum_width: 2.0
+  vacuum_spacing: 0.05
+  max_energies:
+    light_hole: 6.0
+    heavy_hole: 1.8
+    split_off: 4.0
+    conduction_band: 7.5
+  compute_all_bands: false
+
+output_basic: true
+output_contours: false
+output_full_potential: false
+num_contours: 6
+contour_spacing: 0.0
+contour_angle: 0.0
