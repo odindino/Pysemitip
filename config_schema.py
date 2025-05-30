@@ -1,4 +1,3 @@
-# filepath: d:\Git works\Pysemitip\config_schema.py
 """
 SEMITIP 配置資料結構定義
 
@@ -21,7 +20,7 @@ SEMITIP 配置資料結構定義
 - 更新探針配置使用位置子結構
 - 向後相容舊格式
 
-作者: Pysemitip 開發團隊
+作者: Odindino
 版本: 2.0
 日期: 2025-05-30
 """

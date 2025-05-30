@@ -7,7 +7,7 @@ SEMITIP YAML 配置檔案讀取器
 3. 配置驗證和錯誤處理
 4. 配置檔案的結構化操作
 
-作者: Pysemitip 開發團隊
+作者: Odindino
 版本: 1.0
 日期: 2025-05-30
 """
@@ -56,13 +56,12 @@ class YamlConfigReader:
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 yaml_data = yaml.safe_load(f)
-            
-            # 將 YAML 資料轉換為配置物件
+              # 將 YAML 資料轉換為配置物件
             config = self._yaml_to_config(yaml_data)
             
-            # 暫時跳過驗證，方便測試
-            # config.validate()
-            logger.info("暫時跳過配置驗證")
+            # 執行配置驗證
+            config.validate()
+            logger.info("配置驗證通過")
             
             self.config = config
             logger.info("配置檔案載入成功")
@@ -91,8 +90,11 @@ class YamlConfigReader:
         """
         file_path = Path(file_path)
         
-        # 暫時跳過驗證，方便測試
-        # config.validate()
+        # 檢查配置物件是否有效
+        if not isinstance(config, SemitipConfig):
+            raise ValueError("提供的配置物件無效，必須是 SemitipConfig 類型")
+        logger.info(f"正在儲存配置檔案: {file_path}")
+        
         
         # 轉換為 YAML 格式
         yaml_data = self._config_to_yaml(config)
