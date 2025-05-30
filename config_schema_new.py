@@ -370,7 +370,8 @@ class SemitipConfig:
         elif self.simulation_type == "MultPlane":
             if not self.multplane_specific:
                 self.multplane_specific = MultPlaneConfig()
-                  # 處理字典類型的環境參數
+                
+        # 處理字典類型的環境參數
         if isinstance(self.environment, dict):
             self.environment = EnvironmentConfig(**self.environment)
             
@@ -384,9 +385,6 @@ class SemitipConfig:
                     'y': tip_dict.pop('y_position', 0.0)
                 }
                 tip_dict['position'] = PositionConfig(**position_dict)
-            # 處理新格式的巢狀 position 字典
-            elif 'position' in tip_dict and isinstance(tip_dict['position'], dict):
-                tip_dict['position'] = PositionConfig(**tip_dict['position'])
             self.tip = TipConfig(**tip_dict)
             
         # 處理字典類型的半導體參數

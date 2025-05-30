@@ -251,10 +251,10 @@ class YamlConfigReader:
             'contour_spacing': contour_spacing,
             'contour_angle': contour_angle,
             'multint_config': multint_config,
-            'multplane_config': multplane_config
-        }
+            'multplane_config': multplane_config        }
         
         return SemitipConfig(**config_args)
+    
     def _config_to_yaml(self, config: SemitipConfig) -> Dict[str, Any]:
         """
         將配置物件轉換為 YAML 格式的字典
@@ -271,24 +271,66 @@ class YamlConfigReader:
         result['version'] = config.version
         result['simulation_type'] = config.simulation_type
         
-        # 環境設定
-        result['environment'] = {
-            'temperature': config.temperature,
-            'dielectric_constant': config.dielectric_constant
-        }
+        # 階層化結構
+        result['environment'] = self._dataclass_to_dict(config.environment)
+        result['tip'] = self._dataclass_to_dict(config.tip)
+        result['semiconductor'] = self._dataclass_to_dict(config.semiconductor)
+        result['surface'] = self._dataclass_to_dict(config.surface)
+        result['grid'] = self._dataclass_to_dict(config.grid)
+        result['computation'] = self._dataclass_to_dict(config.computation)
+        result['voltage_scan'] = self._dataclass_to_dict(config.voltage_scan)
+        result['output'] = self._dataclass_to_dict(config.output)
         
-        # 處理 tip 配置 (轉換回 position 結構)
-        if config.tip:
-            tip_dict = self._dataclass_to_dict(config.tip)
-            # 將 x_position, y_position 轉換為 position 結構
-            if 'x_position' in tip_dict or 'y_position' in tip_dict:
-                tip_dict['position'] = {
-                    'x': tip_dict.pop('x_position', 0.0),
-                    'y': tip_dict.pop('y_position', 0.0)
-                }
-            result['tip'] = tip_dict
+        # 模擬類型特有參數
+        if config.multint_specific:
+            result['multint_specific'] = self._dataclass_to_dict(config.multint_specific)
         
-        # 處理半導體區域 (新階層結構)
+        if config.multplane_specific:
+            result['multplane_specific'] = self._dataclass_to_dict(config.multplane_specific)
+        
+        return result
+    
+    def _dataclass_to_dict(self, obj) -> Dict[str, Any]:
+        """
+        將 dataclass 物件轉換為字典
+        
+        Args:
+            obj: dataclass 物件
+            
+        Returns:
+            Dict: 轉換後的字典
+        """
+        if obj is None:
+            return {}
+        
+        from dataclasses import asdict
+        return asdict(obj)
+    
+    def get_simulation_type(self) -> Optional[str]:
+        """
+        取得當前配置的模擬類型
+        
+        Returns:
+            str: 模擬類型 ("MultInt" 或 "MultPlane")
+        """
+        if self.config:
+            return self.config.simulation_type
+        return None
+    
+    def validate_config(self) -> bool:
+        """
+        驗證當前配置的有效性
+        
+        Returns:
+            bool: 驗證是否通過
+            
+        Raises:
+            ValueError: 配置驗證失敗
+        """
+        if not self.config:
+            raise ValueError("尚未載入配置檔案")
+        
+        return self.config.validate()
         if config.semiconductor_regions:
             semiconductor_regions = []
             for region in config.semiconductor_regions:
@@ -448,7 +490,7 @@ if __name__ == "__main__":
     # 載入配置檔案範例
     try:
         config = load_yaml_config("config_template.yaml")
-        print(f"載入的模擬類型: {config.get_simulation_type()}")
+        print(f"載入的模擬類型: {config.simulation_type}")
         
         # 儲存配置檔案範例
         save_yaml_config(config, "output_config.yaml")

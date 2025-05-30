@@ -1,4 +1,3 @@
-# filepath: d:\Git works\Pysemitip\config_schema.py
 """
 SEMITIP 配置資料結構定義
 
@@ -355,8 +354,7 @@ class SemitipConfig:
     def multplane_config(self) -> Optional[MultPlaneConfig]:
         """向後相容：取得 MultPlane 配置"""
         return self.multplane_specific
-    
-    @multplane_config.setter
+      @multplane_config.setter
     def multplane_config(self, value: Optional[MultPlaneConfig]):
         """向後相容：設定 MultPlane 配置"""
         self.multplane_specific = value
@@ -370,7 +368,8 @@ class SemitipConfig:
         elif self.simulation_type == "MultPlane":
             if not self.multplane_specific:
                 self.multplane_specific = MultPlaneConfig()
-                  # 處理字典類型的環境參數
+                
+        # 處理字典類型的環境參數
         if isinstance(self.environment, dict):
             self.environment = EnvironmentConfig(**self.environment)
             
@@ -384,9 +383,6 @@ class SemitipConfig:
                     'y': tip_dict.pop('y_position', 0.0)
                 }
                 tip_dict['position'] = PositionConfig(**position_dict)
-            # 處理新格式的巢狀 position 字典
-            elif 'position' in tip_dict and isinstance(tip_dict['position'], dict):
-                tip_dict['position'] = PositionConfig(**tip_dict['position'])
             self.tip = TipConfig(**tip_dict)
             
         # 處理字典類型的半導體參數
@@ -439,16 +435,44 @@ class SemitipConfig:
                     if 'second_distribution' in region and isinstance(region['second_distribution'], dict):
                         region['second_distribution'] = SurfaceDistribution(**region['second_distribution'])
                     self.surface.regions[i] = SurfaceRegion(**region)
+            
+        # 處理半導體區域
+        if self.semiconductor_regions:
+            processed_regions = []
+            for region in self.semiconductor_regions:
+                if isinstance(region, dict):
+                    # 處理有效質量
+                    if 'effective_mass' in region and isinstance(region['effective_mass'], dict):
+                        region['effective_mass'] = EffectiveMass(**region['effective_mass'])
+                    processed_regions.append(SemiconductorRegion(**region))
+                else:
+                    processed_regions.append(region)
+            self.semiconductor_regions = processed_regions
+            
+        # 處理表面區域
+        if self.surface_regions:
+            processed_surface_regions = []
+            for region in self.surface_regions:
+                if isinstance(region, dict):
+                    # 處理表面分佈
+                    if 'first_distribution' in region and isinstance(region['first_distribution'], dict):
+                        region['first_distribution'] = SurfaceDistribution(**region['first_distribution'])
+                    if 'second_distribution' in region and isinstance(region['second_distribution'], dict):
+                        region['second_distribution'] = SurfaceDistribution(**region['second_distribution'])
+                    processed_surface_regions.append(SurfaceRegion(**region))
+                else:
+                    processed_surface_regions.append(region)
+            self.surface_regions = processed_surface_regions
 
     def validate(self):
         """驗證配置參數的有效性"""
         errors = []
         
         # 基本參數驗證
-        if self.environment.temperature <= 0:
-            errors.append("溫度必須大於 0")
+        if self.temperature <= 0:
+            errors.append("溫度必須大於 0K")
         
-        if self.environment.dielectric_constant <= 0:
+        if self.dielectric_constant <= 0:
             errors.append("介電常數必須大於 0")
         
         # 探針參數驗證
@@ -459,10 +483,10 @@ class SemitipConfig:
             errors.append("探針分離距離必須大於 0")
         
         # 半導體區域驗證
-        if not self.semiconductor.regions:
+        if not self.semiconductor_regions:
             errors.append("至少需要一個半導體區域")
         
-        for region in self.semiconductor.regions:
+        for region in self.semiconductor_regions:
             if region.band_gap <= 0:
                 errors.append(f"半導體區域 {region.id} 的帶隙必須大於 0")
             
@@ -491,21 +515,21 @@ class SemitipConfig:
         
         # 模擬類型特有驗證
         if self.simulation_type == "MultInt":
-            if not self.multint_specific:
-                errors.append("MultInt 模擬類型需要 multint_specific")
+            if not self.multint_config:
+                errors.append("MultInt 模擬類型需要 multint_config")
             else:
-                if self.multint_specific.parallel_wavevectors <= 0:
+                if self.multint_config.parallel_wavevectors <= 0:
                     errors.append("平行波向量數必須大於 0")
-                if self.multint_specific.energy_points <= 0:
+                if self.multint_config.energy_points <= 0:
                     errors.append("能量點數必須大於 0")
         
         elif self.simulation_type == "MultPlane":
-            if not self.multplane_specific:
-                errors.append("MultPlane 模擬類型需要 multplane_specific")
+            if not self.multplane_config:
+                errors.append("MultPlane 模擬類型需要 multplane_config")
             else:
-                if self.multplane_specific.vacuum_width <= 0:
+                if self.multplane_config.vacuum_width <= 0:
                     errors.append("真空寬度必須大於 0")
-                if self.multplane_specific.vacuum_spacing <= 0:
+                if self.multplane_config.vacuum_spacing <= 0:
                     errors.append("真空間距必須大於 0")
         
         if errors:
