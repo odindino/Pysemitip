@@ -13,12 +13,12 @@ logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
 
 # 確保在當前目錄運行
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
 # 導入配置相關類別
 try:
-    from config_schema import (
+    from src.core.config_schema import (
         SemitipConfig, TipConfig, SemiconductorRegion, SurfaceRegion,
         EffectiveMass, SurfaceDistribution, GridConfig, ComputationConfig,
         VoltageScanConfig, MultIntConfig, MultPlaneConfig
@@ -160,16 +160,16 @@ def convert_yaml_to_config(yaml_data):
 
 def main():
     """主函數"""
-    conversion_dir = BASE_DIR / "converted_configs"
+    data_dir = BASE_DIR / "data" / "input"
     
     # 測試 MultInt 配置
-    multint_path = conversion_dir / "MultInt_config.yaml"
+    multint_path = data_dir / "MultInt_config.yaml"
     multint_config = load_yaml_to_config(multint_path)
     
     print("\n" + "-" * 40 + "\n")
     
     # 測試 MultPlane 配置
-    multplane_path = conversion_dir / "MultPlane_config.yaml"
+    multplane_path = data_dir / "MultPlane_config.yaml"
     multplane_config = load_yaml_to_config(multplane_path)
 
 if __name__ == "__main__":

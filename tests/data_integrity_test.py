@@ -28,8 +28,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
 try:
-    from filereader import YamlConfigReader
-    from config_schema import SemitipConfig
+    from src.core.filereader import YamlConfigReader
+    from src.core.config_schema import SemitipConfig
 except ImportError as e:
     logger.error(f"模組導入失敗: {e}")
     sys.exit(1)
@@ -224,7 +224,7 @@ tip:
   radius: [1.0  # 缺少右方括號，格式錯誤
 """
         
-        temp_file = BASE_DIR / "test" / "temp_malformed.yaml"
+        temp_file = BASE_DIR / "tests" / "temp_malformed.yaml"
         try:
             with open(temp_file, 'w', encoding='utf-8') as f:
                 f.write(malformed_yaml)
@@ -253,7 +253,7 @@ environment:
   dielectric_constant: 12.9
 """
         
-        temp_file = BASE_DIR / "test" / "temp_minimal.yaml"
+        temp_file = BASE_DIR / "tests" / "temp_minimal.yaml"
         try:
             with open(temp_file, 'w', encoding='utf-8') as f:
                 f.write(minimal_yaml)
@@ -292,7 +292,7 @@ tip:
     y: 0.0
 """
         
-        temp_file = BASE_DIR / "test" / "temp_invalid.yaml"
+        temp_file = BASE_DIR / "tests" / "temp_invalid.yaml"
         try:
             with open(temp_file, 'w', encoding='utf-8') as f:
                 f.write(invalid_yaml)
@@ -358,8 +358,8 @@ def main():
     
     # 測試檔案
     test_files = [
-        BASE_DIR / "Import_Files" / "MultInt_config.yaml",
-        BASE_DIR / "Import_Files" / "MultPlane_config.yaml"
+        BASE_DIR / "data" / "input" / "MultInt_config.yaml",
+        BASE_DIR / "data" / "input" / "MultPlane_config.yaml"
     ]
     
     for file_path in test_files:

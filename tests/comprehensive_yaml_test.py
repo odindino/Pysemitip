@@ -29,7 +29,7 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler('test_results.log', encoding='utf-8')
+        logging.FileHandler('logs/test_results.log', encoding='utf-8')
     ]
 )
 logger = logging.getLogger(__name__)
@@ -39,8 +39,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
 try:
-    from filereader import YamlConfigReader
-    from config_schema import SemitipConfig
+    from src.core.filereader import YamlConfigReader
+    from src.core.config_schema import SemitipConfig
     logger.info("✅ 成功導入必要的模組")
 except ImportError as e:
     logger.error(f"❌ 模組導入失敗: {e}")
@@ -540,8 +540,8 @@ def main():
     
     # 定義測試檔案
     test_files = [
-        BASE_DIR / "Import_Files" / "MultInt_config.yaml",
-        BASE_DIR / "Import_Files" / "MultPlane_config.yaml"
+        BASE_DIR / "data" / "input" / "MultInt_config.yaml",
+        BASE_DIR / "data" / "input" / "MultPlane_config.yaml"
     ]
     
     for file_path in test_files:

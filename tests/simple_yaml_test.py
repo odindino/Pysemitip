@@ -40,17 +40,17 @@ def test_yaml_file(file_path):
 
 def main():
     """主函數"""
-    base_dir = Path(__file__).resolve().parent
-    conversion_dir = base_dir / "converted_configs"
+    base_dir = Path(__file__).resolve().parent.parent
+    data_dir = base_dir / "data" / "input"
     
     # 測試 MultInt 配置文件
-    multint_path = conversion_dir / "MultInt_config.yaml"
+    multint_path = data_dir / "MultInt_config.yaml"
     test_yaml_file(multint_path)
     
     print("\n" + "-" * 40 + "\n")
     
     # 測試 MultPlane 配置文件
-    multplane_path = conversion_dir / "MultPlane_config.yaml"
+    multplane_path = data_dir / "MultPlane_config.yaml"
     test_yaml_file(multplane_path)
 
 if __name__ == "__main__":

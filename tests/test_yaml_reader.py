@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.DEBUG,
 logger = logging.getLogger(__name__)
 
 # 確保在腳本所在目錄中運行
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 os.chdir(BASE_DIR)
 logger.info(f"工作目錄設置為: {BASE_DIR}")
 
@@ -25,8 +25,8 @@ sys.path.insert(0, str(BASE_DIR))
 logger.info(f"導入路徑: {sys.path}")
 
 # 檢查文件是否存在
-filereader_path = BASE_DIR / "filereader.py"
-config_schema_path = BASE_DIR / "config_schema.py"
+filereader_path = BASE_DIR / "src" / "core" / "filereader.py"
+config_schema_path = BASE_DIR / "src" / "core" / "config_schema.py"
 
 if not filereader_path.exists():
     logger.error(f"找不到 filereader.py: {filereader_path}")
@@ -42,7 +42,7 @@ else:
 
 # 導入 filereader 模組
 try:
-    from filereader import YamlConfigReader
+    from src.core.filereader import YamlConfigReader
     logger.info("成功導入 YamlConfigReader")
 except ImportError as e:
     logger.error(f"無法導入 YamlConfigReader: {e}")
@@ -110,12 +110,12 @@ def main():
     """主函數"""
     try:
         # 測試 MultInt YAML 文件
-        multint_path = BASE_DIR / "converted_configs" / "MultInt_config.yaml"
+        multint_path = BASE_DIR / "data" / "input" / "MultInt_config.yaml"
         logger.info(f"測試 MultInt 配置文件: {multint_path}")
         multint_config = test_read_yaml(multint_path)
         
         # 測試 MultPlane YAML 文件
-        multplane_path = BASE_DIR / "converted_configs" / "MultPlane_config.yaml"
+        multplane_path = BASE_DIR / "data" / "input" / "MultPlane_config.yaml"
         logger.info(f"測試 MultPlane 配置文件: {multplane_path}")
         multplane_config = test_read_yaml(multplane_path)
         

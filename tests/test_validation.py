@@ -9,12 +9,12 @@ from pathlib import Path
 
 # 確保能夠導入專案模組
 current_dir = Path(os.getcwd())
-project_root = current_dir.parent if 'test' in current_dir.name else current_dir
+project_root = current_dir.parent if 'tests' in current_dir.name else current_dir
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from filereader import YamlConfigReader
-from config_schema import SemitipConfig
+from src.core.filereader import YamlConfigReader
+from src.core.config_schema import SemitipConfig
 
 # 創建一個正常配置
 reader = YamlConfigReader()

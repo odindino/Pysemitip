@@ -23,8 +23,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
 try:
-    from filereader import YamlConfigReader
-    from config_schema import SemitipConfig
+    from src.core.filereader import YamlConfigReader
+    from src.core.config_schema import SemitipConfig
 except ImportError as e:
     print(f"模組導入失敗: {e}")
     sys.exit(1)
@@ -303,8 +303,8 @@ def main():
     
     # 測試檔案
     test_files = [
-        BASE_DIR / "Import_Files" / "MultInt_config.yaml",
-        BASE_DIR / "Import_Files" / "MultPlane_config.yaml"
+        BASE_DIR / "data" / "input" / "MultInt_config.yaml",
+        BASE_DIR / "data" / "input" / "MultPlane_config.yaml"
     ]
     
     for file_path in test_files:

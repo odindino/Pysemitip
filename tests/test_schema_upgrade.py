@@ -12,10 +12,10 @@ import sys
 from pathlib import Path
 
 # 添加項目路徑
-project_root = Path(__file__).parent
+project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from filereader import YamlConfigReader
+from src.core.filereader import YamlConfigReader
 import logging
 
 # 設定日誌
@@ -27,8 +27,8 @@ def test_config_loading():
     reader = YamlConfigReader()
     
     # 測試檔案路徑
-    multint_file = project_root / "Import_Files" / "MultInt_config.yaml"
-    multplane_file = project_root / "Import_Files" / "MultPlane_config.yaml"
+    multint_file = project_root / "data" / "input" / "MultInt_config.yaml"
+    multplane_file = project_root / "data" / "input" / "MultPlane_config.yaml"
     
     print("=" * 60)
     print("🧪 測試新版 config_schema.py 對階層化 YAML 的支援")
@@ -94,11 +94,11 @@ def test_config_saving():
     
     try:
         # 載入配置
-        multint_file = project_root / "Import_Files" / "MultInt_config.yaml"
+        multint_file = project_root / "data" / "input" / "MultInt_config.yaml"
         config = reader.load_config(multint_file)
         
         # 儲存到測試檔案
-        output_file = project_root / "test_output_config.yaml"
+        output_file = project_root / "tests" / "test_output_config.yaml"
         reader.save_config(config, output_file)
         
         print(f"✅ 配置檔案已儲存至: {output_file}")

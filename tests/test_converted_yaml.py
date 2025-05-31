@@ -12,7 +12,7 @@
 import sys
 import logging
 from pathlib import Path
-from filereader import YamlConfigReader, load_yaml_config
+from src.core.filereader import YamlConfigReader, load_yaml_config
 
 # 設定日誌格式
 logging.basicConfig(
@@ -162,25 +162,27 @@ def main():
     print("開始測試 filereader.py 讀取轉換後的 YAML 檔案")
     
     # 測試檔案列表
+    base_dir = Path(__file__).resolve().parent.parent
+    output_dir = base_dir / "data" / "output" / "converted_ImportFiles"
+    
     test_files = [
-        "test_multint.yaml",
-        "test_multplane.yaml",
-        "converted_MultInt_config.yaml", 
-        "converted_MultPlane_config.yaml"
+        output_dir / "test_multint.yaml",
+        output_dir / "test_multplane.yaml",
+        output_dir / "converted_MultInt_config.yaml", 
+        output_dir / "converted_MultPlane_config.yaml"
     ]
     
     # 檢查並測試存在的檔案
     success_count = 0
     tested_count = 0
     
-    for file_name in test_files:
-        file_path = Path(file_name)
+    for file_path in test_files:
         if file_path.exists():
             tested_count += 1
-            if test_yaml_file(file_name):
+            if test_yaml_file(str(file_path)):
                 success_count += 1
         else:
-            print(f"\n跳過不存在的檔案: {file_name}")
+            print(f"\n跳過不存在的檔案: {file_path.name}")
     
     # 總結
     print(f"\n{'='*60}")
