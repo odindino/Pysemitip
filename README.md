@@ -4,7 +4,7 @@
 
 A modern Python implementation of the SEMITIP Fortran package for STM (Scanning Tunneling Microscopy) simulations on semiconductor surfaces.
 
-## ✅ 目前狀態 (2025-01-06)
+## ✅ 目前狀態 (2025-June-01)
 
 ### 已完成功能
 - ✅ **配置系統**: YAML 載入、驗證、型別轉換完全正常
