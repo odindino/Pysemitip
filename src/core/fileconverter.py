@@ -5,7 +5,7 @@ Fort.9 to YAML Converter for SEMITIP
 This module converts old fort.9 files (fort_MultInt.9 or fort_MultPlane.9)
 to the new YAML configuration format.
 
-Author: Zi-Liang Yang
+Author: Odindino
 Date: 2025-05-31
 """
 

@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Union
 import logging
 
-from config_schema import SemitipConfig
+from .config_schema import SemitipConfig
 
 # 設定日誌
 logging.basicConfig(level=logging.INFO)
@@ -143,8 +143,8 @@ class YamlConfigReader:
         Returns:
             SemitipConfig: 配置物件
         """
-        from config_schema import (
-            TipConfig, EffectiveMass, SemiconductorRegion, 
+        from .config_schema import (
+            TipConfig, PositionConfig, EffectiveMass, SemiconductorRegion, 
             SurfaceDistribution, SurfaceRegion, GridConfig,
             ComputationConfig, VoltageScanConfig, MultIntConfig, MultPlaneConfig
         )
@@ -160,12 +160,15 @@ class YamlConfigReader:
             tip_copy = tip_data.copy()
             # 處理 position 結構轉換
             if 'position' in tip_copy:
-                position = tip_copy.pop('position')
-                tip_copy['x_position'] = position.get('x', 0.0)
-                tip_copy['y_position'] = position.get('y', 0.0)
+                position_data = tip_copy.pop('position')
+                tip_copy['position'] = PositionConfig(**position_data)
             tip_config = TipConfig(**tip_copy)
         else:
-            tip_config = TipConfig()        
+            tip_config = TipConfig()
+        
+        # 處理根層級的 contact_potential (向後相容)
+        if 'contact_potential' in yaml_data:
+            tip_config.contact_potential = float(yaml_data['contact_potential'])        
         # 處理半導體區域 (支援新的階層結構)
         semiconductor_regions = []
         semiconductor_data = yaml_data.get('semiconductor', {})
@@ -174,8 +177,26 @@ class YamlConfigReader:
         for region_data in regions_data:
             # 處理區域內的有效質量
             region_copy = region_data.copy()
+            
+            # Convert string scientific notation to float
+            for key in ['donor_concentration', 'acceptor_concentration', 'band_gap', 
+                       'affinity', 'permittivity', 'valence_band_offset',
+                       'donor_binding_energy', 'acceptor_binding_energy', 'spin_orbit_splitting']:
+                if key in region_copy and isinstance(region_copy[key], str):
+                    try:
+                        region_copy[key] = float(region_copy[key])
+                    except ValueError:
+                        pass  # Keep as string if conversion fails
+            
             if 'effective_mass' in region_copy:
                 effective_mass_data = region_copy['effective_mass']
+                # Convert effective mass values too
+                for key in ['conduction_band', 'valence_band_heavy', 'valence_band_light', 'split_off']:
+                    if key in effective_mass_data and isinstance(effective_mass_data[key], str):
+                        try:
+                            effective_mass_data[key] = float(effective_mass_data[key])
+                        except ValueError:
+                            pass
                 region_copy['effective_mass'] = EffectiveMass(**effective_mass_data)
             semiconductor_regions.append(SemiconductorRegion(**region_copy))
         
@@ -193,11 +214,30 @@ class YamlConfigReader:
             
             if 'first_distribution' in surface_copy:
                 first_dist_data = surface_copy['first_distribution']
+                # Convert string values to float for surface distributions
+                for key in ['density', 'neutrality_level', 'fwhm', 'center_energy']:
+                    if key in first_dist_data and isinstance(first_dist_data[key], str):
+                        try:
+                            first_dist_data[key] = float(first_dist_data[key])
+                        except ValueError:
+                            pass
                 surface_copy['first_distribution'] = SurfaceDistribution(**first_dist_data)
             
             if 'second_distribution' in surface_copy:
-                second_dist_data = surface_copy['second_distribution']  
+                second_dist_data = surface_copy['second_distribution']
+                # Convert string values to float for surface distributions  
+                for key in ['density', 'neutrality_level', 'fwhm', 'center_energy']:
+                    if key in second_dist_data and isinstance(second_dist_data[key], str):
+                        try:
+                            second_dist_data[key] = float(second_dist_data[key])
+                        except ValueError:
+                            pass
                 surface_copy['second_distribution'] = SurfaceDistribution(**second_dist_data)
+            
+            # 處理 position 結構轉換
+            if 'position' in surface_copy:
+                position_data = surface_copy.pop('position')
+                surface_copy['position'] = PositionConfig(**position_data)
                 
             surface_regions.append(SurfaceRegion(**surface_copy))
         
@@ -212,6 +252,18 @@ class YamlConfigReader:
         # 處理計算配置
         computation_data = yaml_data.get('computation', {})
         computation_config = ComputationConfig(**computation_data) if computation_data else ComputationConfig()
+        
+        # 處理根層級的配置參數 (向後相容)
+        if 'mirror_symmetry' in yaml_data:
+            grid_config.mirror_plane = bool(yaml_data['mirror_symmetry'])
+        if 'charge_table_points' in yaml_data:
+            computation_config.charge_density_table_size = int(yaml_data['charge_table_points'])
+        if 'max_iterations' in yaml_data:
+            max_iter = int(yaml_data['max_iterations'])
+            computation_config.max_iterations = [max_iter] + computation_config.max_iterations[1:]
+        if 'convergence_tolerance' in yaml_data:
+            conv_tol = float(yaml_data['convergence_tolerance'])
+            computation_config.convergence_parameters = [conv_tol] + computation_config.convergence_parameters[1:]
           # 處理電壓掃描配置
         voltage_scan_data = yaml_data.get('voltage_scan', {})
         voltage_scan_config = VoltageScanConfig(**voltage_scan_data) if voltage_scan_data else VoltageScanConfig()
@@ -232,28 +284,54 @@ class YamlConfigReader:
         contour_spacing = output_data.get('contour_spacing', yaml_data.get('contour_spacing', 0.0))
         contour_angle = output_data.get('contour_angle', yaml_data.get('contour_angle', 0.0))
         
-        # 創建主配置物件
+        # 創建階層化配置物件
+        from .config_schema import (
+            EnvironmentConfig, SemiconductorConfig, SurfaceConfig, OutputConfig
+        )
+        
+        # 創建環境配置
+        environment_config = EnvironmentConfig(
+            temperature=temperature,
+            dielectric_constant=dielectric_constant
+        )
+        
+        # 創建半導體配置
+        semiconductor_config = SemiconductorConfig(
+            regions=semiconductor_regions,
+            electron_affinity=electron_affinity
+        )
+        
+        # 創建表面配置  
+        surface_config = SurfaceConfig(
+            regions=surface_regions,
+            temperature_dependence=surface_temperature_dependence
+        )
+        
+        # 創建輸出配置
+        output_config = OutputConfig(
+            basic_output=output_basic,
+            equipotential_contours=output_contours,
+            full_potential=output_full_potential,
+            num_contours=num_contours,
+            contour_spacing=contour_spacing,
+            contour_angle=contour_angle
+        )
+        
+        # 創建主配置物件 (使用階層結構)
         config_args = {
             'version': yaml_data.get('version', '1.0'),
             'simulation_type': yaml_data.get('simulation_type', 'MultInt'),
-            'temperature': temperature,
-            'dielectric_constant': dielectric_constant,
+            'environment': environment_config,
             'tip': tip_config,
-            'semiconductor_regions': semiconductor_regions,
-            'surface_regions': surface_regions,
+            'semiconductor': semiconductor_config,
+            'surface': surface_config,
             'grid': grid_config,
             'computation': computation_config,
             'voltage_scan': voltage_scan_config,
-            'electron_affinity': electron_affinity,
-            'surface_temperature_dependence': surface_temperature_dependence,
-            'output_basic': output_basic,
-            'output_contours': output_contours,
-            'output_full_potential': output_full_potential,
-            'num_contours': num_contours,
-            'contour_spacing': contour_spacing,
-            'contour_angle': contour_angle,
-            'multint_config': multint_config,
-            'multplane_config': multplane_config        }
+            'output': output_config,
+            'multint_specific': multint_config,
+            'multplane_specific': multplane_config
+        }
         
         return SemitipConfig(**config_args)
     

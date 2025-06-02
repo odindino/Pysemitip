@@ -1,0 +1,86 @@
+# Test configuration for MultInt simulation
+# Small grid and few bias points for quick testing
+
+version: "1.0"
+simulation_type: "MultInt"
+
+# Environment parameters
+environment:
+  temperature: 300.0
+  dielectric_constant: 12.9
+
+# Grid parameters (small for testing)
+grid:
+  radial_points: 32
+  vacuum_points: 32
+  semiconductor_points: 32
+  angular_points: 16
+  radial_extent: 30.0
+  vacuum_extent: 30.0
+  semiconductor_extent: 30.0
+  energy_points: 40
+
+# STM tip parameters
+tip:
+  radius: 1.0
+  separation: 1.0
+  work_function: 5.3
+  position:
+    x: 0.0
+    y: 0.0
+
+# Voltage scan parameters
+voltage_scan:
+  start: -2.0
+  end: 2.0
+  points: 3
+
+# Semiconductor regions
+semiconductor_regions:
+  - id: 1
+    donor_concentration: 1.0e18
+    acceptor_concentration: 0.0
+    band_gap: 1.42
+    affinity: 4.07
+    permittivity: 12.9
+    valence_band_offset: 0.0
+    donor_binding_energy: 0.006
+    acceptor_binding_energy: 0.031
+    effective_mass:
+      conduction_band: 0.067
+      valence_band_light: 0.08
+      valence_band_heavy: 0.5
+      split_off: 0.15
+    spin_orbit_splitting: 0.34
+    allow_degeneracy: true
+    allow_inversion: true
+
+# Surface regions
+surface_regions:
+  - id: 1
+    position:
+      x: 0.0
+      y: 0.0
+    first_distribution:
+      density: 4.4e14
+      neutrality_level: 0.125
+      fwhm: 0.25
+      center_energy: 1.625
+
+# Output parameters
+output_contours: true
+num_contours: 20
+
+# Numerical parameters
+contact_potential: 0.0
+mirror_symmetry: true
+charge_table_points: 5000
+max_iterations: 200
+convergence_tolerance: 1.0e-6
+
+# Current calculation parameters
+multint_specific:
+  parallel_wavevectors: 10
+  energy_points: 20
+  expansion_factor: 10
+  integration_cutoff: 0.01

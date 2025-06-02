@@ -53,6 +53,7 @@ class TipConfig:
     contact_potential: float = 0.0  # eV
     position: PositionConfig = field(default_factory=PositionConfig)
     fermi_energy: float = 8.0  # eV
+    work_function: float = 5.3  # eV - tip work function
     
     # 向後相容性屬性
     @property
@@ -74,15 +75,38 @@ class TipConfig:
     def y_position(self, value: float):
         """向後相容：設定 y 位置"""
         self.position.y = value
+    
+    @property
+    def slope(self) -> float:
+        """向後相容：取得探針斜率"""
+        return self.shank_slope
+    
+    @slope.setter 
+    def slope(self, value: float):
+        """向後相容：設定探針斜率"""
+        self.shank_slope = value
 
 
 @dataclass
 class EffectiveMass:
     """有效質量參數"""
     conduction_band: float = 0.0635
-    heavy_hole: float = 0.643
-    light_hole: float = 0.081
-    split_off_hole: float = 0.172
+    valence_band_heavy: float = 0.643
+    valence_band_light: float = 0.081
+    split_off: float = 0.172
+    
+    # Legacy aliases for backward compatibility
+    @property
+    def heavy_hole(self) -> float:
+        return self.valence_band_heavy
+    
+    @property
+    def light_hole(self) -> float:
+        return self.valence_band_light
+    
+    @property
+    def split_off_hole(self) -> float:
+        return self.split_off
 
 
 @dataclass
@@ -99,6 +123,12 @@ class SemiconductorRegion:
     spin_orbit_splitting: float = 0.341  # eV
     degeneracy_indicator: int = 0
     inversion_indicator: int = 0
+    
+    # Additional fields for YAML compatibility
+    affinity: float = 4.07  # eV - electron affinity
+    permittivity: float = 12.9  # relative permittivity
+    allow_degeneracy: bool = True
+    allow_inversion: bool = True
 
 
 @dataclass
@@ -107,7 +137,12 @@ class SurfaceDistribution:
     density: float = 0.0  # cm^-2 eV^-1
     neutrality_level: float = 0.0  # eV
     fwhm: float = 0.0  # eV
-    centroid_energy: float = 0.0  # eV
+    center_energy: float = 0.0  # eV
+    
+    # Legacy alias
+    @property
+    def centroid_energy(self) -> float:
+        return self.center_energy
 
 
 @dataclass
@@ -115,7 +150,8 @@ class SurfaceRegion:
     """表面區域參數"""
     id: int = 1
     first_distribution: SurfaceDistribution = field(default_factory=SurfaceDistribution)
-    second_distribution: SurfaceDistribution = field(default_factory=SurfaceDistribution)
+    second_distribution: Optional[SurfaceDistribution] = None
+    position: PositionConfig = field(default_factory=PositionConfig)
 
 
 @dataclass
@@ -152,6 +188,12 @@ class GridConfig:
     semiconductor_points: int = 32
     angular_points: int = 16
     initial_grid_size: float = 0.5
+    
+    # Additional extent parameters
+    radial_extent: float = 20.0
+    vacuum_extent: float = 20.0
+    semiconductor_extent: float = 20.0
+    energy_points: int = 20
 
 
 @dataclass
@@ -167,12 +209,33 @@ class ComputationConfig:
 class VoltageScanConfig:
     """電壓掃描配置"""
     points: int = 41
-    start_voltage: float = -2.0  # V
-    end_voltage: float = 2.0  # V
+    start: float = -2.0  # V (alias for start_voltage)
+    end: float = 2.0  # V (alias for end_voltage)
     modulation_voltage: float = 0.050  # V
     negative_ramp: float = 0.0  # nm/V
     positive_ramp: float = 0.0  # nm/V
     custom_voltages: Optional[List[float]] = None
+    
+    # Legacy aliases
+    @property
+    def start_voltage(self) -> float:
+        return self.start
+    
+    @property 
+    def end_voltage(self) -> float:
+        return self.end
+    
+    @property
+    def voltages(self) -> List[float]:
+        """生成電壓掃描陣列"""
+        if self.custom_voltages:
+            return self.custom_voltages
+        else:
+            # Generate linear space without numpy
+            if self.points <= 1:
+                return [self.start]
+            step = (self.end - self.start) / (self.points - 1)
+            return [self.start + i * step for i in range(self.points)]
 
 
 @dataclass
@@ -182,6 +245,7 @@ class MultIntConfig:
     energy_points: int = 20
     expansion_factor: int = 20
     semiconductor_depth_fraction: float = 0.75
+    integration_cutoff: float = 0.1
 
 
 @dataclass
@@ -258,6 +322,62 @@ class SemitipConfig:
     def surface_regions(self, value: List[SurfaceRegion]):
         """向後相容：設定表面區域"""
         self.surface.regions = value
+    
+    @property
+    def contact_potential(self) -> float:
+        """向後相容：取得接觸電位"""
+        return self.tip.contact_potential
+    
+    @contact_potential.setter
+    def contact_potential(self, value: float):
+        """向後相容：設定接觸電位"""
+        self.tip.contact_potential = value
+    
+    @property
+    def mirror_symmetry(self) -> bool:
+        """向後相容：取得鏡像對稱性"""
+        return self.grid.mirror_plane
+    
+    @mirror_symmetry.setter
+    def mirror_symmetry(self, value: bool):
+        """向後相容：設定鏡像對稱性"""
+        self.grid.mirror_plane = value
+    
+    @property
+    def charge_table_points(self) -> int:
+        """向後相容：取得電荷表點數"""
+        return self.computation.charge_density_table_size
+    
+    @charge_table_points.setter
+    def charge_table_points(self, value: int):
+        """向後相容：設定電荷表點數"""
+        self.computation.charge_density_table_size = value
+    
+    @property
+    def max_iterations(self) -> int:
+        """向後相容：取得最大迭代次數 (第一個值)"""
+        return self.computation.max_iterations[0] if self.computation.max_iterations else 50
+    
+    @max_iterations.setter
+    def max_iterations(self, value: int):
+        """向後相容：設定最大迭代次數 (更新第一個值)"""
+        if not self.computation.max_iterations:
+            self.computation.max_iterations = [value]
+        else:
+            self.computation.max_iterations[0] = value
+    
+    @property
+    def convergence_tolerance(self) -> float:
+        """向後相容：取得收斂容差 (第一個值)"""
+        return self.computation.convergence_parameters[0] if self.computation.convergence_parameters else 1e-3
+    
+    @convergence_tolerance.setter
+    def convergence_tolerance(self, value: float):
+        """向後相容：設定收斂容差 (更新第一個值)"""
+        if not self.computation.convergence_parameters:
+            self.computation.convergence_parameters = [value]
+        else:
+            self.computation.convergence_parameters[0] = value
     
     @property
     def electron_affinity(self) -> float:
