@@ -9,7 +9,8 @@ tip:
   protrusion_radius: 0.0
   contact_potential: 0.0
   x_position: 0.0
-  y_position: 0.0  fermi_energy: 8.0
+  y_position: 0.0
+fermi_energy: 8.0
 electron_affinity: 4.07
 semiconductor_regions:
 - id: 1

@@ -150,7 +150,7 @@ class ChargeDensityCalculator:
     
     def fermi_integral_half(self, eta: float) -> float:
         """
-        Calculate Fermi-Dirac integral of order 1/2.
+        Calculate Fermi-Dirac integral of order 1/2 exactly following Fortran FJINT.
         
         F_{1/2}(η) = ∫[0,∞] x^{1/2} / (1 + exp(x - η)) dx
         
@@ -160,36 +160,55 @@ class ChargeDensityCalculator:
         Returns:
             Fermi integral value
         """
-        if eta > 5:
-            # Degenerate limit (Sommerfeld expansion)
-            return (2 / 3) * np.sqrt(np.pi) * eta**(3/2) * (
-                1 + np.pi**2 / 8 * eta**(-2) + 7 * np.pi**4 / 640 * eta**(-4)
-            )
-        elif eta < -5:
-            # Non-degenerate limit (Boltzmann)
-            return np.sqrt(np.pi) / 2 * np.exp(eta)
+        # Follow Fortran FJINT implementation exactly
+        if eta > 40:
+            # Degenerate limit: FJINT=SQRT(ETA**(J+2))/(J/2.+1)
+            # For J=1: F_{1/2}(eta) = sqrt(eta^3) / (3/2) = (2/3) * eta^(3/2)
+            return (2.0 / 3.0) * eta**(3.0/2.0)
+        elif eta < -8:
+            # Non-degenerate limit: FJINT=SQRT(PI)*EXP(AMAX1(-40.,ETA))/2.
+            # For J=1: F_{1/2}(eta) = (sqrt(pi)/2) * exp(max(-40, eta))
+            return np.sqrt(np.pi) / 2.0 * np.exp(max(-40.0, eta))
         else:
-            # Intermediate region - use numerical integration
-            from scipy import integrate
+            # Intermediate region: use trapezoidal rule integration
+            # FJINT=TRAP(FJ,0.,20.+ETA,1000)
+            # where FJ=SQRT(X**J)/(1.+EXP(X-ETA))
+            x_max = 20.0 + eta
+            n_points = 1000
+            dx = x_max / n_points
             
-            def integrand(x):
-                if x > 100:  # Avoid overflow
-                    return 0.0
-                return np.sqrt(x) / (1 + np.exp(x - eta))
+            integral = 0.0
+            for i in range(n_points + 1):
+                x = i * dx
+                if i == 0 or i == n_points:
+                    weight = 0.5
+                else:
+                    weight = 1.0
+                
+                # FJ function: sqrt(x^1) / (1 + exp(x - eta))
+                if x == 0:
+                    integrand_val = 0.0
+                else:
+                    exp_arg = x - eta
+                    if exp_arg > 40:  # Prevent overflow
+                        integrand_val = 0.0
+                    else:
+                        integrand_val = np.sqrt(x) / (1.0 + np.exp(exp_arg))
+                
+                integral += weight * integrand_val * dx
             
-            result, _ = integrate.quad(integrand, 0, max(50, eta + 20))
-            return result
+            return integral
     
-    def calculate_bulk_density(self, region_id: int, energy: float, 
+    def calculate_bulk_density(self, region_id: int, fermi_level_var: float, 
                              potential: float = 0.0) -> float:
         """
-        Calculate bulk charge density at given energy and potential.
+        Calculate bulk charge density for given fermi level and potential.
         
-        Implements SEMIRHO functionality.
+        Based on Fortran RHOCB/RHOVB functions.
         
         Args:
             region_id: Semiconductor region ID
-            energy: Energy relative to vacuum (eV)
+            fermi_level_var: Variable Fermi level position (eV, relative to VB max)
             potential: Electrostatic potential (V)
             
         Returns:
@@ -200,18 +219,16 @@ class ChargeDensityCalculator:
         
         region = self.semiconductor_regions[region_id]
         
-        # Adjust energy for potential
-        energy_local = energy + potential
-        
-        # Calculate carrier densities
-        n = self._electron_density(region, energy_local, self.fermi_level)
-        p = self._hole_density(region, energy_local, self.fermi_level)
+        # Calculate carrier densities using the variable fermi level
+        n = self._electron_density_direct(region, fermi_level_var, potential)
+        p = self._hole_density_direct(region, fermi_level_var, potential)
         
         # Ionized dopant densities (complete ionization assumed)
         n_d = region.donor_concentration
         n_a = region.acceptor_concentration
         
         # Net charge density (C/cm^3)
+        # From Fortran: -RHOCB - RHOA + RHOVB + RHOD
         rho = PC.E * (p - n + n_d - n_a)
         
         return rho
@@ -221,30 +238,45 @@ class ChargeDensityCalculator:
         """
         Calculate electron density in conduction band.
         
+        Based on Fortran RHOCB function.
+        
         Args:
             region: Semiconductor region
-            energy: Local energy (including potential)
-            fermi_level: Fermi level
+            energy: Local energy (eV, relative to vacuum) 
+            fermi_level: Fermi level (eV, relative to valence band maximum)
             
         Returns:
             Electron density (cm^-3)
         """
-        # Conduction band edge
-        Ec = region.conduction_band_edge()
+        # Convert energy to potential relative to vacuum
+        # In Fortran: energy parameter represents potential
+        potential = energy
         
-        # Reduced energy (note: energy here includes potential shift)
-        # eta = (EF - EC) / kT
-        eta = (fermi_level - (Ec - energy)) / region.kT
+        # Conduction band edge relative to valence band = band_gap + valence_band_offset
+        Ec_rel = region.band_gap + region.valence_band_offset
+        
+        # Reduced energy: (EF - Ec + potential) / kT 
+        # From Fortran: (EF-EGAP(IREG)-DELVB(IREG)-Pot)/TK
+        eta = (fermi_level - Ec_rel - potential) / region.kT
         
         # Effective density of states
         Nc = region.Nc
         
+        # Check for band occupation suppression
+        if region.suppress_conduction_band:
+            return 0.0
+        
         if region.allow_degeneracy:
-            # Fermi-Dirac statistics
+            # Fermi-Dirac statistics using Fermi integral
             n = Nc * (2 / np.sqrt(np.pi)) * self.fermi_integral_half(eta)
         else:
             # Boltzmann statistics
-            n = Nc * np.exp(eta) if eta < 0 else Nc  # Cap at Nc for positive eta
+            if eta > 40:  # Prevent overflow
+                n = 0.0
+            elif eta < -40:  # Degenerate limit
+                n = Nc
+            else:
+                n = Nc * np.exp(eta)
         
         return n
     
@@ -253,32 +285,165 @@ class ChargeDensityCalculator:
         """
         Calculate hole density in valence band.
         
+        Based on Fortran RHOVB function.
+        
         Args:
             region: Semiconductor region
-            energy: Local energy (including potential)
-            fermi_level: Fermi level
+            energy: Local energy (eV, relative to vacuum)
+            fermi_level: Fermi level (eV, relative to valence band maximum)
             
         Returns:
             Hole density (cm^-3)
         """
-        # Valence band edge
-        Ev = region.valence_band_edge()
+        # Convert energy to potential relative to vacuum
+        potential = energy
         
-        # Reduced energy for holes
-        # eta = (EV - EF) / kT
-        eta = ((Ev - energy) - fermi_level) / region.kT
+        # Valence band edge relative to valence band = valence_band_offset
+        Ev_rel = region.valence_band_offset
+        
+        # Reduced energy for holes: (-EF + Ev + potential) / kT
+        # From Fortran: (-EF+DELVB(IREG)+Pot)/TK
+        eta = (-fermi_level + Ev_rel + potential) / region.kT
         
         # Effective density of states
         Nv = region.Nv
         
+        # Check for band occupation suppression
+        if region.suppress_valence_band:
+            return 0.0
+        
         if region.allow_degeneracy:
-            # Fermi-Dirac statistics
+            # Fermi-Dirac statistics using Fermi integral
             p = Nv * (2 / np.sqrt(np.pi)) * self.fermi_integral_half(eta)
         else:
             # Boltzmann statistics
-            p = Nv * np.exp(eta) if eta < 0 else Nv  # Cap at Nv
+            if eta > 40:  # Prevent overflow
+                p = 0.0
+            elif eta < -40:  # Degenerate limit
+                p = Nv
+            else:
+                p = Nv * np.exp(eta)
         
         return p
+    
+    def _electron_density_direct(self, region: SemiconductorRegion, 
+                                fermi_level: float, potential: float) -> float:
+        """
+        Calculate electron density directly following Fortran RHOCB.
+        
+        Args:
+            region: Semiconductor region
+            fermi_level: Fermi level (eV, relative to valence band maximum)
+            potential: Electrostatic potential (V)
+            
+        Returns:
+            Electron density (cm^-3)
+        """
+        # Check for band occupation suppression
+        if region.suppress_conduction_band:
+            return 0.0
+            
+        # Conduction band edge relative to valence band = band_gap + valence_band_offset
+        Ec_rel = region.band_gap + region.valence_band_offset
+        
+        # From Fortran RHOCB: (EF-EGAP(IREG)-DELVB(IREG)-Pot)/TK
+        # Critical: Use the cb_effective_mass property which matches ACB
+        acb = region.cb_effective_mass  # This is the Fortran ACB parameter
+        
+        # Energy difference relative to conduction band edge
+        energy_diff = fermi_level - Ec_rel - potential
+        eta = energy_diff / region.kT
+        
+        # Add extreme value protection
+        if eta > 100:  # Prevent overflow in exponentials
+            eta = 100
+        elif eta < -100:
+            eta = -100
+        
+        # Constants from Fortran: C = 6.815E21 eV^-1.5 cm^-3
+        C = 6.815e21
+        
+        if region.temperature == 0:
+            # T=0 case
+            if energy_diff <= 0:
+                return 0.0
+            else:
+                # From Fortran: (2.*C/3.)*SQRT((ACB(IREG)*(EF-EGAP-DELVB-Pot))**3)
+                arg = acb * energy_diff
+                if arg <= 0:
+                    return 0.0
+                return (2.0 * C / 3.0) * np.sqrt(arg**3)
+        else:
+            # Finite temperature case
+            # From Fortran: C*SQRT((ACB(IREG)*TK)**3)*FJINT(1,(EF-EGAP-DELVB-Pot)/TK)
+            prefactor = C * np.sqrt((acb * region.kT)**3)
+            n = prefactor * self.fermi_integral_half(eta)
+            
+            # Add stability checks
+            if not np.isfinite(n) or n < 0:
+                return 0.0
+            elif n > 1e50:
+                return 1e50
+            
+            return n
+    
+    def _hole_density_direct(self, region: SemiconductorRegion,
+                            fermi_level: float, potential: float) -> float:
+        """
+        Calculate hole density directly following Fortran RHOVB.
+        
+        Args:
+            region: Semiconductor region
+            fermi_level: Fermi level (eV, relative to valence band maximum) 
+            potential: Electrostatic potential (V)
+            
+        Returns:
+            Hole density (cm^-3)
+        """
+        # Check for band occupation suppression
+        if region.suppress_valence_band:
+            return 0.0
+            
+        # Critical: Use the vb_effective_mass_avg property which matches AVB
+        avb = region.vb_effective_mass_avg  # This is the Fortran AVB parameter
+        
+        # Energy difference relative to valence band edge
+        # From Fortran RHOVB: (-EF+DELVB(IREG)+Pot)/TK
+        energy_diff = -fermi_level + region.valence_band_offset + potential
+        eta = energy_diff / region.kT
+        
+        # Add extreme value protection
+        if eta > 100:  # Prevent overflow in exponentials
+            eta = 100
+        elif eta < -100:
+            eta = -100
+        
+        # Constants from Fortran: C = 6.815E21 eV^-1.5 cm^-3
+        C = 6.815e21
+        
+        if region.temperature == 0:
+            # T=0 case
+            if energy_diff <= 0:
+                return 0.0
+            else:
+                # From Fortran: (2.*C/3.)*SQRT((AVB(IREG)*(-EF+DELVB+Pot))**3)
+                arg = avb * energy_diff
+                if arg <= 0:
+                    return 0.0
+                return (2.0 * C / 3.0) * np.sqrt(arg**3)
+        else:
+            # Finite temperature case  
+            # From Fortran: C*SQRT((AVB(IREG)*TK)**3)*FJINT(1,(-EF+DELVB+Pot)/TK)
+            prefactor = C * np.sqrt((avb * region.kT)**3)
+            p = prefactor * self.fermi_integral_half(eta)
+            
+            # Add stability checks
+            if not np.isfinite(p) or p < 0:
+                return 0.0
+            elif p > 1e50:
+                return 1e50
+            
+            return p
     
     def calculate_surface_density(self, area_id: int, energy: float,
                                 potential: float = 0.0) -> float:
@@ -309,10 +474,15 @@ class ChargeDensityCalculator:
     def create_charge_tables(self, energy_range: Tuple[float, float],
                            num_points: int = 20000) -> ChargeDensityTables:
         """
-        Create tabulated charge densities for all regions.
+        Create tabulated charge densities for all regions following Fortran SEMIRHO.
+        
+        The table represents charge density vs. Fermi level (at zero potential).
+        This matches the Fortran SEMIRHO subroutine logic where:
+        - EF1 = (I-1)*DELE + ESTART represents the variable Fermi level
+        - RHOBTAB(IREG,I) = RHOB(IREG,EF1,0.) - charge density at EF1, Pot=0
         
         Args:
-            energy_range: (min, max) energy range (eV)
+            energy_range: (min, max) energy range (eV) for Fermi level variation
             num_points: Number of energy points
             
         Returns:
@@ -321,34 +491,53 @@ class ChargeDensityCalculator:
         energy_start, energy_end = energy_range
         energy_step = (energy_end - energy_start) / (num_points - 1)
         
-        # Energy array
-        energies = np.linspace(energy_start, energy_end, num_points)
+        # Energy array represents Fermi level values
+        fermi_levels = np.linspace(energy_start, energy_end, num_points)
         
-        # Create bulk tables
+        print(f"Creating charge density tables:")
+        print(f"  Fermi level range: {energy_start:.6f} to {energy_end:.6f} eV")
+        print(f"  Energy step: {energy_step:.6f} eV")
+        print(f"  Number of points: {num_points}")
+        
+        # Create bulk tables - following Fortran SEMIRHO exactly
         bulk_tables = {}
         for region_id, region in self.semiconductor_regions.items():
             print(f"Computing bulk charge density table for region {region_id}")
             densities = np.zeros(num_points)
             
-            for i, energy in enumerate(energies):
-                # Calculate at zero potential for table
-                densities[i] = self.calculate_bulk_density(region_id, energy, 0.0)
+            for i, ef_var in enumerate(fermi_levels):
+                # Calculate charge density at this Fermi level and zero potential
+                # This matches Fortran: RHOBTAB(IREG,I) = RHOB(IREG,EF1,0.)
+                # where EF1 = (I-1)*DELE + ESTART is the variable Fermi level
+                density = self.calculate_bulk_density(region_id, ef_var, potential=0.0)
+                
+                # Add numerical stability checks
+                if not np.isfinite(density):
+                    density = 0.0
+                elif abs(density) > 1e50:  # Prevent extreme values
+                    density = np.sign(density) * 1e50
+                
+                densities[i] = density
+                
+                # Debug output for first few points
+                if i < 5 or i % 1000 == 0:
+                    n = self._electron_density_direct(region, ef_var, 0.0)
+                    p = self._hole_density_direct(region, ef_var, 0.0)
+                    print(f"    Point {i}: EF={ef_var:.6f}, n={n:.3e}, p={p:.3e}, rho={density:.3e}")
             
             bulk_tables[region_id] = densities
+            print(f"  Region {region_id}: density range {np.min(densities):.3e} to {np.max(densities):.3e}")
         
-        # Create surface tables
+        # Create surface tables - following Fortran SURFRHO
         surface_tables = {}
         for area_id, region in self.surface_regions.items():
             print(f"Computing surface charge density table for area {area_id}")
             densities = np.zeros(num_points)
             
-            for i, energy in enumerate(energies):
-                # Energy here represents surface Fermi level
-                # So potential = energy - bulk_fermi_level
-                potential = energy - self.fermi_level
-                densities[i] = self.calculate_surface_density(area_id, 
-                                                            self.fermi_level, 
-                                                            potential)
+            for i, ef_var in enumerate(fermi_levels):
+                # For surface states, the table represents surface charge vs. surface Fermi level
+                # Surface potential = 0 in table construction
+                densities[i] = self.calculate_surface_density(area_id, ef_var, potential=0.0)
             
             surface_tables[area_id] = densities
         

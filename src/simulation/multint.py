@@ -272,6 +272,9 @@ class MultIntSimulation:
             self.config.charge_table_points
         )
         
+        # Store charge tables for use in charge density functions
+        self._current_charge_tables = charge_tables
+        
         # Multi-grid solution sequence
         solution_3d = None
         grid_sequence = self._get_grid_sequence()
@@ -282,82 +285,13 @@ class MultIntSimulation:
             # Create sub-grid (simplified - full implementation needed)
             # For now, use full grid
             
-            # Define charge density functions using tables
-            def bulk_charge_func(r, z, phi, pot):
-                try:
-                    # Determine which region
-                    region_id = self._get_region_id(r, z, phi)
-                    
-                    # Convert pot to float if it's an int
-                    if isinstance(pot, int):
-                        pot = float(pot)
-                    elif not isinstance(pot, (int, float, np.number)):
-                        pot = float(pot)
-                    
-                    energy = self.fermi_level - pot
-                    
-                    # Additional safety checks
-                    if not np.isfinite(pot):
-                        return 0.0
-                    if not np.isfinite(energy):
-                        return 0.0
-                    
-                    # Limit energy to reasonable range to prevent overflow
-                    energy = np.clip(energy, charge_tables.energy_start, 
-                                   charge_tables.energy_start + (charge_tables.num_points - 1) * charge_tables.energy_step)
-                    
-                    density = charge_tables.interpolate_bulk_density(region_id, energy)
-                    
-                    # Final safety check
-                    if not np.isfinite(density):
-                        return 0.0
-                        
-                    return density
-                except Exception as e:
-                    print(f"Error in bulk_charge_func: {e}")
-                    return 0.0
-            
-            def surface_charge_func(r, phi, pot):
-                try:
-                    # Determine which area
-                    area_id = self._get_area_id(r, phi)
-                    
-                    # Convert pot to float if it's an int
-                    if isinstance(pot, int):
-                        pot = float(pot)
-                    elif not isinstance(pot, (int, float, np.number)):
-                        pot = float(pot)
-                    
-                    energy = self.fermi_level - pot
-                    
-                    # Additional safety checks
-                    if not np.isfinite(pot):
-                        return 0.0
-                    if not np.isfinite(energy):
-                        return 0.0
-                    
-                    # Limit energy to reasonable range to prevent overflow
-                    energy = np.clip(energy, charge_tables.energy_start,
-                                   charge_tables.energy_start + (charge_tables.num_points - 1) * charge_tables.energy_step)
-                    
-                    density = charge_tables.interpolate_surface_density(area_id, energy)
-                    
-                    # Final safety check
-                    if not np.isfinite(density):
-                        return 0.0
-                        
-                    return density
-                except Exception as e:
-                    print(f"Error in surface_charge_func: {e}")
-                    return 0.0
-            
             # Solve Poisson equation
             self.output_file.write(f"SOLUTION # {grid_level + 1}\n")
             self.output_file.flush()
             
             solution_3d, conv_info = self.poisson_solver.solve(
-                bulk_charge_func,
-                surface_charge_func,
+                self._bulk_charge_func,
+                self._surface_charge_func,
                 initial_guess=solution_3d
             )
             
@@ -515,6 +449,133 @@ class MultIntSimulation:
         area boundaries.
         """
         return 1
+    
+    def _bulk_charge_func(self, r, z, phi, pot):
+        """
+        Bulk charge density function for Poisson solver.
+        
+        Following Fortran RHOBULK logic:
+        ENER = EF - Pot  (energy represents local Fermi level)
+        IENER = NINT((ENER-ESTART)/DELE) + 1
+        RHO = RHOBTAB(IREG,IENER)
+        
+        Args:
+            r, z, phi: Spatial coordinates
+            pot: Electric potential (V)
+            
+        Returns:
+            Charge density (C/cm^3)
+        """
+        try:
+            # Determine which region
+            region_id = self._get_region_id(r, z, phi)
+            
+            # Convert pot to float - handle all numeric types safely
+            pot_val = float(pot)
+            
+            # Calculate local Fermi level: ENER = EF - Pot
+            # This is the key insight from Fortran RHOBULK
+            local_fermi_level = self.fermi_level - pot_val
+            
+            # Safety checks - check if values are finite
+            if not (np.isfinite(pot_val) and np.isfinite(local_fermi_level)):
+                return 0.0
+            
+            # Get charge tables
+            charge_tables = self._current_charge_tables
+            
+            # Check if local Fermi level is within table range
+            energy_min = charge_tables.energy_start
+            energy_max = charge_tables.energy_start + (charge_tables.num_points - 1) * charge_tables.energy_step
+            
+            if energy_min <= local_fermi_level <= energy_max:
+                # Use table interpolation - this is the primary path
+                density = charge_tables.interpolate_bulk_density(region_id, local_fermi_level)
+                
+                # Check for valid density
+                if np.isfinite(density):
+                    return density
+            
+            # Fallback to direct calculation for out-of-range energies
+            # Use local_fermi_level as the Fermi level, zero potential in direct calculation
+            return self._calculate_bulk_charge_direct(region_id, local_fermi_level)
+            
+        except Exception as e:
+            # Return zero for any error
+            return 0.0
+    
+    def _surface_charge_func(self, r, phi, pot):
+        """
+        Surface charge density function for Poisson solver.
+        
+        Args:
+            r, phi: Surface coordinates  
+            pot: Surface potential
+            
+        Returns:
+            Surface charge density (C/cm^2)
+        """
+        try:
+            # Determine which area
+            area_id = self._get_area_id(r, phi)
+            
+            # Convert pot to float
+            pot_val = float(pot)
+            
+            # Calculate energy
+            energy = self.fermi_level - pot_val
+            
+            # Safety checks
+            if not (np.isfinite(pot_val) and np.isfinite(energy)):
+                return 0.0
+            
+            # Get charge tables
+            charge_tables = self._current_charge_tables
+            
+            # Limit energy to table range
+            energy_min = charge_tables.energy_start
+            energy_max = charge_tables.energy_start + (charge_tables.num_points - 1) * charge_tables.energy_step
+            
+            if energy_min <= energy <= energy_max:
+                density = charge_tables.interpolate_surface_density(area_id, energy)
+                
+                if np.isfinite(density):
+                    return density
+            
+            # Fallback calculation
+            return self._calculate_surface_charge_direct(area_id, energy)
+            
+        except Exception as e:
+            return 0.0
+    
+    def _calculate_bulk_charge_direct(self, region_id: int, local_fermi_level: float) -> float:
+        """
+        Direct calculation of bulk charge density for out-of-range energies.
+        
+        Args:
+            region_id: Semiconductor region ID
+            local_fermi_level: Local Fermi level (EF - potential)
+            
+        Returns:
+            Charge density (C/cm^3)
+        """
+        try:
+            # Use charge calculator for direct computation with zero potential
+            # since the local_fermi_level already accounts for the potential shift
+            return self.charge_calculator.calculate_bulk_density(region_id, local_fermi_level, 0.0)
+        except:
+            return 0.0
+    
+    def _calculate_surface_charge_direct(self, area_id: int, energy: float) -> float:
+        """
+        Direct calculation of surface charge density for out-of-range energies.
+        """
+        try:
+            # Calculate potential from energy
+            potential = self.fermi_level - energy
+            return self.charge_calculator.calculate_surface_density(area_id, self.fermi_level, potential)
+        except:
+            return 0.0
     
     def _save_results(self):
         """Save simulation results to file."""

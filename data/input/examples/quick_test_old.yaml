@@ -1,0 +1,86 @@
+# Quick test configuration for MultInt simulation
+# Minimal settings for fast testing
+
+version: "1.0"
+simulation_type: "MultInt"
+
+# Environment parameters
+environment:
+  temperature: 300.0
+  dielectric_constant: 12.9
+
+# Grid parameters (very small for quick test)
+grid:
+  radial_points: 16
+  vacuum_points: 16
+  semiconductor_points: 16
+  angular_points: 8
+  radial_extent: 20.0
+  vacuum_extent: 20.0
+  semiconductor_extent: 20.0
+  energy_points: 20
+
+# STM tip parameters
+tip:
+  radius: 1.0
+  separation: 1.0
+  work_function: 5.3
+  position:
+    x: 0.0
+    y: 0.0
+
+# Voltage scan parameters (just 2 points for quick test)
+voltage_scan:
+  start: -1.0
+  end: 1.0
+  points: 2
+
+# Single semiconductor region (n-type GaAs)
+semiconductor_regions:
+  - id: 1
+    donor_concentration: 1.0e18
+    acceptor_concentration: 0.0
+    band_gap: 1.42
+    affinity: 4.07
+    permittivity: 12.9
+    valence_band_offset: 0.0
+    donor_binding_energy: 0.006
+    acceptor_binding_energy: 0.031
+    effective_mass:
+      conduction_band: 0.067
+      valence_band_light: 0.08
+      valence_band_heavy: 0.5
+      split_off: 0.15
+    spin_orbit_splitting: 0.34
+    allow_degeneracy: false  # Use Boltzmann for speed
+    allow_inversion: true
+
+# Simple surface states
+surface_regions:
+  - id: 1
+    position:
+      x: 0.0
+      y: 0.0
+    first_distribution:
+      density: 1.0e14
+      neutrality_level: 0.7
+      fwhm: 0.0  # Constant DOS for simplicity
+      center_energy: 0.0
+
+# Output parameters
+output_contours: false  # Skip for quick test
+num_contours: 10
+
+# Numerical parameters
+contact_potential: 0.0
+mirror_symmetry: true
+charge_table_points: 1000  # Reduced for speed
+max_iterations: 50  # Reduced for quick test
+convergence_tolerance: 1.0e-3  # Relaxed for quick test
+
+# Current calculation parameters
+multint_specific:
+  parallel_wavevectors: 5
+  energy_points: 10
+  expansion_factor: 5
+  integration_cutoff: 0.1

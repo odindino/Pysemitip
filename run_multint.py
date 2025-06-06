@@ -82,9 +82,9 @@ def main():
         if args.plot:
             print("\nGenerating plots...")
             
-            # Create subdirectories
-            figures_dir = output_dir / 'figures'
-            contours_dir = output_dir / 'contours'
+            # Create subdirectories - use absolute paths
+            figures_dir = Path('figures')
+            contours_dir = Path('contours')
             figures_dir.mkdir(exist_ok=True)
             contours_dir.mkdir(exist_ok=True)
             

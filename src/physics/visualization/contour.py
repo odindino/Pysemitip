@@ -88,7 +88,20 @@ class ContourPlotter:
         else:
             v_min, v_max = potential_range
         
+        # Ensure v_min < v_max and levels are valid
+        if v_max <= v_min:
+            v_range = max(abs(v_min), abs(v_max), 1e-6)  # Fallback to small range
+            v_min = -v_range
+            v_max = v_range
+        
         levels = np.linspace(v_min, v_max, n_contours)
+        
+        # Ensure levels are strictly increasing (remove duplicates)
+        levels = np.unique(levels)
+        if len(levels) < 3:  # Need at least 3 levels for contour
+            v_center = (v_min + v_max) / 2
+            v_range = max(abs(v_max - v_min), 1e-6)
+            levels = np.linspace(v_center - v_range/2, v_center + v_range/2, n_contours)
         
         # Create meshgrid
         R, Z = np.meshgrid(r_plot, z_plot, indexing='ij')
@@ -264,7 +277,21 @@ class ContourPlotter:
         R, Z = np.meshgrid(r_plot, z_plot, indexing='ij')
         
         # Contour levels
-        levels = np.linspace(potential_plot.min(), potential_plot.max(), 20)
+        v_min, v_max = potential_plot.min(), potential_plot.max()
+        
+        # Ensure valid range
+        if v_max <= v_min:
+            v_range = max(abs(v_min), abs(v_max), 1e-6)
+            v_min = -v_range
+            v_max = v_range
+        
+        levels = np.linspace(v_min, v_max, 20)
+        levels = np.unique(levels)  # Remove duplicates
+        
+        if len(levels) < 3:
+            v_center = (v_min + v_max) / 2
+            v_range = max(abs(v_max - v_min), 1e-6)
+            levels = np.linspace(v_center - v_range/2, v_center + v_range/2, 20)
         
         cs = ax_main.contourf(R, Z, potential_plot, levels=levels,
                             cmap='RdBu_r', extend='both')

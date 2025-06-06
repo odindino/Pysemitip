@@ -273,29 +273,46 @@ class SEMITIPPlotter:
         # Panel 1: Potential profile
         ax1 = fig.add_subplot(gs[0, 0])
         if hasattr(result, 'potential_profile') and result.potential_profile:
-            z, pot = result.potential_profile.get_combined_profile()
-            ax1.plot(z, pot, 'b-', linewidth=2)
-            ax1.set_xlabel('Position z (nm)')
-            ax1.set_ylabel('Potential (eV)')
-            ax1.set_title('Potential Profile')
-            ax1.grid(True, alpha=0.3)
-            ax1.axvline(x=0, color='gray', linestyle='--', alpha=0.5)
+            try:
+                z, pot = result.potential_profile.get_combined_profile()
+                # Ensure arrays have same length
+                min_len = min(len(z), len(pot))
+                z = z[:min_len]
+                pot = pot[:min_len]
+                ax1.plot(z, pot, 'b-', linewidth=2)
+                ax1.set_xlabel('Position z (nm)')
+                ax1.set_ylabel('Potential (eV)')
+                ax1.set_title('Potential Profile')
+                ax1.grid(True, alpha=0.3)
+                ax1.axvline(x=0, color='gray', linestyle='--', alpha=0.5)
+            except Exception as e:
+                # Skip plotting if there's an error
+                ax1.text(0.5, 0.5, f'Error plotting profile:\n{str(e)}', 
+                        transform=ax1.transAxes, ha='center', va='center')
         
         # Panel 2: Band diagram
         ax2 = fig.add_subplot(gs[0, 1])
         if hasattr(result, 'potential_profile') and result.potential_profile:
-            z, pot = result.potential_profile.get_combined_profile()
-            vb = pot - band_gap
-            cb = pot
-            ax2.plot(z, vb, 'r-', linewidth=2, label='VB')
-            ax2.plot(z, cb, 'g-', linewidth=2, label='CB')
-            ax2.axhline(y=0, color='k', linestyle=':', linewidth=1, label='EF')
-            ax2.set_xlabel('Position z (nm)')
-            ax2.set_ylabel('Energy (eV)')
-            ax2.set_title('Band Diagram')
-            ax2.legend()
-            ax2.grid(True, alpha=0.3)
-            ax2.axvline(x=0, color='gray', linestyle='--', alpha=0.5)
+            try:
+                z, pot = result.potential_profile.get_combined_profile()
+                # Ensure arrays have same length
+                min_len = min(len(z), len(pot))
+                z = z[:min_len]
+                pot = pot[:min_len]
+                vb = pot - band_gap
+                cb = pot
+                ax2.plot(z, vb, 'r-', linewidth=2, label='VB')
+                ax2.plot(z, cb, 'g-', linewidth=2, label='CB')
+                ax2.axhline(y=0, color='k', linestyle=':', linewidth=1, label='EF')
+                ax2.set_xlabel('Position z (nm)')
+                ax2.set_ylabel('Energy (eV)')
+                ax2.set_title('Band Diagram')
+                ax2.legend()
+                ax2.grid(True, alpha=0.3)
+                ax2.axvline(x=0, color='gray', linestyle='--', alpha=0.5)
+            except Exception as e:
+                ax2.text(0.5, 0.5, f'Error plotting bands:\n{str(e)}', 
+                        transform=ax2.transAxes, ha='center', va='center')
         
         # Panel 3: Convergence
         ax3 = fig.add_subplot(gs[1, 0])
