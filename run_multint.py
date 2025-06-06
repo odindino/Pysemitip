@@ -73,7 +73,9 @@ def main():
     try:
         
         config_path = Path(original_dir) / args.config
-        results = run_multint_simulation(str(config_path))
+        # For testing: limit to first 2 voltage points
+        max_points = 2  # TODO: make this configurable via command line
+        results = run_multint_simulation(str(config_path), max_points=max_points)
         
         print(f"\nSimulation completed successfully!")
         print(f"Results saved to: {output_dir / 'multint_results.pkl'}")

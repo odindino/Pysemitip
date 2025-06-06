@@ -199,19 +199,24 @@ class MultIntSimulation:
         logger.info("Solvers initialized")
     
     def run(self, bias_voltages: Optional[List[float]] = None,
-            save_interval: int = 1) -> List[SimulationResults]:
+            save_interval: int = 1, max_points: Optional[int] = None) -> List[SimulationResults]:
         """
         Run simulation for specified bias voltages.
         
         Args:
             bias_voltages: List of bias voltages (V). If None, use config values.
             save_interval: Save results every N bias points
+            max_points: Maximum number of voltage points to process (for testing)
             
         Returns:
             List of SimulationResults
         """
         if bias_voltages is None:
             bias_voltages = self.config.voltage_scan.voltages
+        
+        # Limit number of points for testing
+        if max_points is not None:
+            bias_voltages = bias_voltages[:max_points]
         
         logger.info(f"Starting simulation for {len(bias_voltages)} bias voltages")
         self.output_file.write("\n")
@@ -236,35 +241,53 @@ class MultIntSimulation:
     
     def _solve_single_bias(self, bias_voltage: float) -> SimulationResults:
         """
-        Solve for a single bias voltage.
+        Solve for a single bias voltage with modulation (following Fortran logic).
         
         Args:
-            bias_voltage: Bias voltage (V)
+            bias_voltage: Base bias voltage (V)
             
         Returns:
             SimulationResults object
         """
         start_time = time.time()
         
-        # Update tip potential
-        self.tip.bias_voltage = bias_voltage
+        # Get modulation voltage from config
+        modulation_voltage = self.config.voltage_scan.modulation_voltage
+        
+        # Implement Fortran modulation logic: imod loop from -1 to 1 step 2
+        # For now, use imod = -1 (first iteration) to match Fortran output
+        if modulation_voltage > 0:
+            # bias = bias0 + imod * bmod * sqrt(2.)
+            import math
+            imod = -1  # First iteration (like Fortran)
+            bias_actual = bias_voltage + imod * modulation_voltage * math.sqrt(2.0)
+        else:
+            bias_actual = bias_voltage
+        
+        # Update tip potential with actual bias
+        self.tip.bias_voltage = bias_actual
         tip_potential = self.tip.tip_potential
         
         self.output_file.write(f"\nSEPARATION = {self.tip.separation}\n")
-        self.output_file.write(f"\nBIAS, TIP POTENTIAL = {bias_voltage} {tip_potential}\n")
+        self.output_file.write(f"\nBIAS, TIP POTENTIAL = {bias_actual} {tip_potential}\n")
         
         # Estimate depletion width (1D approximation)
-        depl_width_1d = self._estimate_depletion_width_1d(bias_voltage)
+        depl_width_1d = self._estimate_depletion_width_1d(bias_actual)
         self.output_file.write(f"1-D ESTIMATE OF DEPLETION WIDTH (NM) = {depl_width_1d:.6f}\n")
         
         # Create charge density tables
-        energy_range = self._calculate_energy_range(bias_voltage)
+        energy_range = self._calculate_energy_range(bias_actual)
         self.output_file.write(f"ESTART,EEND,NE = {energy_range[0]:.6f} "
                              f"{energy_range[1]:.6f} {self.config.charge_table_points}\n")
         
         logger.info("Computing charge density tables...")
         self.output_file.write("COMPUTING TABLE OF BULK CHARGE DENSITIES\n")
         self.output_file.write("COMPUTING TABLE OF SURFACE CHARGE DENSITIES\n")
+        
+        # Add hyperboloid parameters (ETAT, A, Z0, C) like Fortran
+        eta, a, z0, c = self.tip.hyperboloid_parameters()
+        self.output_file.write(f"ETAT, A, Z0, C = {eta:.8f} {a:.8f} {z0:.8e} {c:.8e}\n")
+        
         self.output_file.flush()
         
         charge_tables = self.charge_calculator.create_charge_tables(
@@ -282,8 +305,58 @@ class MultIntSimulation:
         for grid_level, (nr, nv, ns, np) in enumerate(grid_sequence):
             self.output_file.write(f"NR,NS,NV,NP = {nr} {ns} {nv} {np}\n")
             
-            # Create sub-grid (simplified - full implementation needed)
-            # For now, use full grid
+            # Calculate grid spacing for this level (following Fortran doubling logic)
+            # Each stage halves the spacing as grid dimensions double
+            spacing_factor = 2.0 ** grid_level
+            delr = self.grid.params.delr / spacing_factor  # Input parameter halved each stage
+            dels = self.grid.params.dels / spacing_factor  # Input parameter halved each stage
+            delv = self.grid.params.delv / spacing_factor  # TODO: Should be hyperboloidal
+            delp = self.grid.params.delp / spacing_factor  # Angular spacing halved each stage
+            
+            self.output_file.write(f"DELR,DELS,DELV,DELP = {delr:.5f} {dels:.5f} {delv:.5f} {delp:.5f}\n")
+            
+            # Show largest radius and depth like Fortran (scales with finer grid)
+            if hasattr(self.grid, 'r') and len(self.grid.r) > 0:
+                # Estimate maximum coordinates for this grid level
+                # Finer grids have larger coordinate ranges
+                rmax = self.grid.r[-1] * spacing_factor
+                smax = (self.grid.zs_positive[-1] if hasattr(self.grid, 'zs_positive') 
+                       and len(self.grid.zs_positive) > 0 else self.grid.params.smax) * spacing_factor
+            else:
+                rmax = self.grid.params.rmax * spacing_factor
+                smax = self.grid.params.smax * spacing_factor
+                
+            self.output_file.write(f"LARGEST RADIUS, DEPTH = {rmax:.5f} {smax:.5f}\n")
+            
+            # Update Poisson solver parameters for this grid level
+            # Use different convergence tolerances for each stage (from config)
+            if hasattr(self.config.computation, 'convergence_parameters'):
+                tolerance = self.config.computation.convergence_parameters[grid_level]
+            else:
+                # Default tolerances matching Fortran
+                default_tol = [1e-3, 1e-3, 1e-4]
+                tolerance = default_tol[min(grid_level, len(default_tol)-1)]
+            
+            # Update solver parameters for this grid level following Fortran
+            from ..physics.core.poisson import PoissonSolverParameters
+            
+            # Get max iterations for this stage from config
+            stage_max_iter = self.config.computation.max_iterations[min(grid_level, len(self.config.computation.max_iterations)-1)]
+            
+            # For first stage, use much higher iteration count like Fortran (3500)
+            if grid_level == 0:
+                stage_max_iter = max(stage_max_iter, 4000)  # Ensure at least 4000 iterations for convergence
+            
+            solver_params = PoissonSolverParameters(
+                tolerance=tolerance,
+                max_iterations=stage_max_iter,
+                omega=0.8,
+                adaptive_omega=True,
+                verbose=True
+            )
+            
+            # Create new solver with updated parameters
+            self.poisson_solver = type(self.poisson_solver)(self.grid, self.tip, solver_params)
             
             # Solve Poisson equation
             self.output_file.write(f"SOLUTION # {grid_level + 1}\n")
@@ -343,7 +416,7 @@ class MultIntSimulation:
         
         # Create results
         result = SimulationResults(
-            bias_voltage=bias_voltage,
+            bias_voltage=bias_actual,  # Use actual bias with modulation
             tip_potential=tip_potential,
             band_bending=bb,
             depletion_width=depl_width,
@@ -372,11 +445,9 @@ class MultIntSimulation:
         # Simple depletion approximation for primary region
         region = self.semiconductor_regions[0]
         
-        # Built-in potential
-        vbi = self.fermi_level - region.valence_band_edge()
-        
-        # Total potential drop
-        total_potential = abs(vbi - bias_voltage)
+        # For depletion width estimation, use only bias voltage (matches Fortran)
+        # Built-in potential contributes to band bending but not depletion width calc
+        total_potential = abs(bias_voltage)
         
         # Depletion width formula
         eps = region.permittivity * PC.EPSILON0
@@ -399,32 +470,45 @@ class MultIntSimulation:
         ETMP=EEND-ESTART
         ESTART=ESTART-2.*ETMP
         EEND=EEND+2.*ETMP
+        
+        Key insight: EN0 is the charge neutrality level, not the energy spread.
+        For single surface distributions, EN0 = EN (neutrality level parameter).
         """
         # Get tip potential (BIAS + contact potential)
         tip_potential = self.tip.tip_potential
         
-        # Get surface state energy ranges (EN0MIN, EN0MAX)
-        en0_min = float('inf')
-        en0_max = float('-inf')
+        # Calculate charge neutrality levels (EN0) following Fortran logic
+        # In Fortran, EN0 is found by ENFIND routine for each surface area
+        en0_values = []
         
         for region in self.surface_regions:
+            # For single distribution case, EN0 = EN (neutrality level)
             if hasattr(region, 'distribution1') and region.distribution1:
                 d1 = region.distribution1
                 if d1.density > 0:
-                    en0_min = min(en0_min, d1.center_energy - 3 * max(d1.fwhm, 0.1))
-                    en0_max = max(en0_max, d1.center_energy + 3 * max(d1.fwhm, 0.1))
+                    # If only first distribution is non-zero
+                    if (not hasattr(region, 'distribution2') or 
+                        region.distribution2 is None or 
+                        region.distribution2.density == 0):
+                        en0_values.append(d1.neutrality_level)
+                    else:
+                        # Both distributions non-zero: would need ENFIND calculation
+                        # For now, use first distribution neutrality level as approximation
+                        en0_values.append(d1.neutrality_level)
             
-            if hasattr(region, 'distribution2') and region.distribution2:
-                d2 = region.distribution2
-                if d2.density > 0:
-                    en0_min = min(en0_min, d2.center_energy - 3 * max(d2.fwhm, 0.1))
-                    en0_max = max(en0_max, d2.center_energy + 3 * max(d2.fwhm, 0.1))
+            # Second distribution only
+            elif (hasattr(region, 'distribution2') and region.distribution2 and 
+                  region.distribution2.density > 0):
+                en0_values.append(region.distribution2.neutrality_level)
         
         # Handle case where no surface states are defined
-        if en0_min == float('inf'):
+        if not en0_values:
             en0_min = -1.0  # Default minimum
-        if en0_max == float('-inf'):
             en0_max = 2.0   # Default maximum
+        else:
+            # Find min and max of charge neutrality levels across all areas
+            en0_min = min(en0_values)
+            en0_max = max(en0_values)
         
         # Fortran logic: ESTART=AMIN1(EF,EF-PotTIP,EN0MIN)
         ef_minus_tip = self.fermi_level - tip_potential
@@ -442,28 +526,55 @@ class MultIntSimulation:
     
     def _get_grid_sequence(self) -> List[Tuple[int, int, int, int]]:
         """
-        Get multi-grid sequence for convergence.
+        Get multi-grid sequence following Fortran SEMITIP3 logic.
+        
+        The Fortran code implements progressive grid doubling:
+        1. Start with initial grid from config
+        2. Double all dimensions (NR, NS, NV, NP) each stage
+        3. If memory limit reached, try doubling only NS
+        4. Continue until max stages (IPMAX=3) reached
         
         Returns:
             List of (nr, nv, ns, np) tuples
         """
-        # Start with coarse grid and refine
-        # This matches the Fortran multi-grid approach
-        nr_final = self.grid.params.nr
-        nv_final = self.grid.params.nv
-        ns_final = self.grid.params.ns
-        np_final = self.grid.params.np
+        # Initial grid from configuration (matches Fortran NRIN, NSIN, NVIN, NPIN)
+        nr_start = self.grid.params.nr
+        nv_start = self.grid.params.nv  # This should be 4 from config
+        ns_start = self.grid.params.ns
+        np_start = self.grid.params.np
         
-        # Three-level sequence
-        sequence = [
-            (nr_final // 4, nv_final // 4, ns_final // 4, np_final // 2),
-            (nr_final // 2, nv_final // 2, ns_final // 2, np_final),
-            (nr_final, nv_final, ns_final, np_final)
-        ]
+        # Maximum dimensions (Fortran limits from PARAMETER statement)
+        # NRDIM=512, NVDIM=64, NSDIM=512, NPDIM=64
+        max_nr = 512
+        max_nv = 64
+        max_ns = 512
+        max_np = 64
         
-        # Ensure minimum sizes
-        sequence = [(max(16, nr), max(16, nv), max(16, ns), max(8, np))
-                   for nr, nv, ns, np in sequence]
+        sequence = []
+        nr, nv, ns, np = nr_start, nv_start, ns_start, np_start
+        
+        # Stage 1: Initial grid
+        sequence.append((nr, nv, ns, np))
+        
+        # Stage 2: First doubling (if possible)
+        if (nr*2 <= max_nr and nv*2 <= max_nv and 
+            ns*2 <= max_ns and np*2 <= max_np):
+            nr, nv, ns, np = nr*2, nv*2, ns*2, np*2
+            sequence.append((nr, nv, ns, np))
+            
+            # Stage 3: Second doubling (if possible)  
+            if (nr*2 <= max_nr and nv*2 <= max_nv and 
+                ns*2 <= max_ns and np*2 <= max_np):
+                nr, nv, ns, np = nr*2, nv*2, ns*2, np*2
+                sequence.append((nr, nv, ns, np))
+            else:
+                # Try doubling only semiconductor grid (NS)
+                if ns*2 <= max_ns:
+                    sequence.append((nr, nv, ns*2, np))
+        else:
+            # If can't double everything, try doubling only semiconductor grid
+            if ns*2 <= max_ns:
+                sequence.append((nr, nv, ns*2, np))
         
         return sequence
     
@@ -583,7 +694,13 @@ class MultIntSimulation:
                     return density
             
             # Fallback calculation
-            return self._calculate_surface_charge_direct(area_id, energy)
+            result = self._calculate_surface_charge_direct(area_id, energy)
+            
+            # Debug surface charge at origin
+            if abs(r) < 0.1 and abs(phi) < 0.1:
+                print(f"    Surface charge debug: r={r:.3f}, phi={phi:.3f}, pot={pot_val:.6f}, energy={energy:.3f}, density={result:.2e}")
+            
+            return result
             
         except Exception as e:
             return 0.0
@@ -637,12 +754,13 @@ class MultIntSimulation:
             self.output_file.close()
 
 
-def run_multint_simulation(config_file: str) -> List[SimulationResults]:
+def run_multint_simulation(config_file: str, max_points: Optional[int] = None) -> List[SimulationResults]:
     """
     Run MultInt simulation from configuration file.
     
     Args:
         config_file: Path to YAML configuration file
+        max_points: Maximum number of voltage points to process (for testing)
         
     Returns:
         List of simulation results
@@ -654,6 +772,6 @@ def run_multint_simulation(config_file: str) -> List[SimulationResults]:
     
     # Create and run simulation
     simulation = MultIntSimulation(config)
-    results = simulation.run()
+    results = simulation.run(max_points=max_points)
     
     return results

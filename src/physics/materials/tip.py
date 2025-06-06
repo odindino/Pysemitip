@@ -56,11 +56,21 @@ class TipModel:
         Returns:
             Tuple of (eta, a, z0, c) parameters used in coordinate transformation
         """
-        # These formulas match the Fortran code
-        eta = 1.0 / np.sqrt(1.0 + self.slope**2)
-        a = self.radius / self.slope
-        z0 = a / self.slope
-        c = np.sqrt(a**2 + z0**2)
+        # These formulas EXACTLY match the Fortran SEMITIP3 code (lines 97-101)
+        # ETAT=1./SQRT(1.+1./SLOPE**2)
+        eta = 1.0 / np.sqrt(1.0 + 1.0 / (self.slope**2))
+        
+        # A=RAD*SLOPE**2/ETAT
+        a = self.radius * (self.slope**2) / eta
+        
+        # SPRIME=A*ETAT
+        sprime = a * eta
+        
+        # Z0=SEP-SPRIME
+        z0 = self.separation - sprime
+        
+        # C=Z0/SPRIME
+        c = z0 / sprime
         
         return eta, a, z0, c
     

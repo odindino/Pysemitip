@@ -279,14 +279,41 @@ class SemiconductorRegion:
         return p + n_d - n - n_a
     
     def _simple_fermi_integral(self, eta: float) -> float:
-        """Simple Fermi integral for charge neutrality calculation."""
-        if eta > 5:
-            return (2.0/3.0) * eta**(1.5)
-        elif eta < -5:
-            return np.sqrt(np.pi) / 2.0 * np.exp(eta)
+        """
+        Exact Fermi-Dirac integral matching Fortran FJINT function.
+        
+        This implements the exact same logic as Fortran semirhomult-6.0.f FJINT:
+        - For eta > 40: asymptotic expansion
+        - For eta < -8: Maxwell-Boltzmann limit  
+        - For -8 <= eta <= 40: numerical integration
+        """
+        if eta > 40:
+            # Asymptotic expansion: FJINT=SQRT(ETA**(J+2))/(J/2.+1) for J=1
+            return np.sqrt(eta**3) / 1.5  # J=1, so (J/2+1) = 1/2+1 = 1.5
+        elif eta < -8:
+            # Maxwell-Boltzmann limit: FJINT=SQRT(PI)*EXP(AMAX1(-40.,ETA))/2.
+            return np.sqrt(np.pi) / 2.0 * np.exp(max(-40.0, eta))
         else:
-            # Simple approximation for intermediate region
-            return np.sqrt(np.pi) / 2.0 * np.exp(eta) * (1 + np.exp(eta)) / (1 + np.exp(eta))
+            # Numerical integration using scipy for accuracy
+            try:
+                from scipy.integrate import quad
+                # F_{1/2}(eta) = integral_0^inf [t^{1/2} / (1 + exp(t-eta))] dt
+                def integrand(t):
+                    return np.sqrt(t) / (1.0 + np.exp(t - eta))
+                
+                # Integration from 0 to 20+eta (matching Fortran TRAP call)
+                result, _ = quad(integrand, 0, 20 + eta, limit=1000)
+                return result
+            except ImportError:
+                # Fallback: use trapezoidal rule like Fortran
+                t_max = 20 + eta
+                n_points = 1000
+                dt = t_max / n_points
+                t_vals = np.linspace(0, t_max, n_points + 1)
+                y_vals = np.sqrt(t_vals) / (1.0 + np.exp(t_vals - eta))
+                # Handle t=0 singularity
+                y_vals[0] = 0.0
+                return np.trapz(y_vals, dx=dt)
     
     def _calculate_fermi_level_fd(self, potential: float) -> float:
         """Calculate Fermi level using full Fermi-Dirac statistics."""

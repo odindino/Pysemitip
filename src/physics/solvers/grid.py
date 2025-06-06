@@ -60,10 +60,10 @@ class GridParameters:
         assert self.dels > 0, "dels must be positive"
         assert self.delp > 0, "delp must be positive"
         
-        # Check consistency
-        assert abs(self.rmax - (self.nr - 1) * self.delr) < 1e-6, "Inconsistent radial grid"
+        # Note: For non-uniform grids (tangent-based), delr and dels are input parameters
+        # not actual spacing, so the linear consistency check doesn't apply
+        # Only check vacuum grid which is still linear
         assert abs(self.vmax - (self.nv - 1) * self.delv) < 1e-6, "Inconsistent vacuum grid"
-        assert abs(self.smax - (self.ns - 1) * self.dels) < 1e-6, "Inconsistent semiconductor grid"
 
 
 class Grid3D:
@@ -74,29 +74,75 @@ class Grid3D:
     for vacuum and semiconductor regions.
     """
     
-    def __init__(self, params: GridParameters):
+    def __init__(self, params: GridParameters, tip_model=None):
         """
         Initialize the grid.
         
         Args:
             params: Grid parameters
+            tip_model: TipModel for hyperboloidal coordinate calculation
         """
         self.params = params
-        self._setup_coordinates()
+        self._setup_coordinates(tip_model)
         self._allocate_arrays()
     
-    def _setup_coordinates(self):
-        """Set up coordinate arrays."""
-        # Radial coordinates
-        self.r = np.linspace(0, self.params.rmax, self.params.nr)
+    def _setup_coordinates(self, tip_model=None):
+        """Set up coordinate arrays using Fortran SEMITIP3 formulas."""
+        # Radial coordinates using tangent formula from SEMITIP3-6.1.f line 116
+        # R(I)=(2*NR*DELR0/PI)*TAN(PI*(I-0.5)/(2.*NR))
+        self.r = np.zeros(self.params.nr)
+        for i in range(self.params.nr):
+            # Convert to 1-based indexing like Fortran
+            i_fortran = i + 1
+            self.r[i] = (2 * self.params.nr * self.params.delr / np.pi) * \
+                        np.tan(np.pi * (i_fortran - 0.5) / (2.0 * self.params.nr))
         
-        # Vacuum z-coordinates (positive z, above surface)
-        self.zv = np.linspace(0, self.params.vmax, self.params.nv)
+        # Vacuum z-coordinates using hyperboloidal coordinates
+        # Following Fortran SEMITIP3-6.1.f lines 127-142
+        if tip_model is not None:
+            eta_tip, a, z0, c = tip_model.hyperboloid_parameters()
+            deleta = eta_tip / float(self.params.nv)  # DELETA = ETAT/FLOAT(NV)
+            
+            # Initialize vacuum coordinates
+            self.zv = np.zeros(self.params.nv)
+            self.delv_array = np.zeros(self.params.nr)  # DELV varies with radius
+            
+            for j in range(self.params.nv):
+                j_fortran = j + 1
+                eta = j_fortran * deleta  # ETA = J*DELETA
+                
+                # Calculate z coordinates using hyperboloidal transformation
+                # For each radial position, we need different z values
+                # Store z for the central axis (r=0) as representative
+                xsi = 1.0  # XSI = 1 at r=0 (central axis)
+                self.zv[j] = a * eta * (xsi + c)  # Z = A*ETA*(XSI+C)
+            
+            # Calculate DELV array for each radial position (Fortran line 127)
+            for i in range(self.params.nr):
+                # DELV(I)=(SQRT(A**2+R(I)**2)+C*A)*ETAT/FLOAT(NV)
+                self.delv_array[i] = (np.sqrt(a**2 + self.r[i]**2) + c*a) * eta_tip / float(self.params.nv)
+            
+            # Store DELV for central axis (r=0) for output, matching Fortran
+            delv_center = (np.sqrt(a**2) + c*a) * eta_tip / float(self.params.nv)
+            self.params.delv = delv_center
+        else:
+            # Fallback to linear spacing if no tip model
+            self.zv = np.linspace(0, self.params.vmax, self.params.nv)
+            self.delv_array = np.full(self.params.nr, self.params.delv)
         
-        # Semiconductor z-coordinates (negative z, below surface)
-        self.zs = -np.linspace(0, self.params.smax, self.params.ns)
+        # Semiconductor z-coordinates using tangent formula from SEMITIP3-6.1.f line 164
+        # S(J)=(2*NS*DELS0/PI)*TAN(PI*(J-0.5)/(2.*NS))
+        self.zs_positive = np.zeros(self.params.ns)
+        for j in range(self.params.ns):
+            # Convert to 1-based indexing like Fortran
+            j_fortran = j + 1
+            self.zs_positive[j] = (2 * self.params.ns * self.params.dels / np.pi) * \
+                                  np.tan(np.pi * (j_fortran - 0.5) / (2.0 * self.params.ns))
         
-        # Angular coordinates
+        # Make semiconductor coordinates negative (below surface)
+        self.zs = -self.zs_positive
+        
+        # Angular coordinates - uniform spacing
         self.phi = np.linspace(0, self.params.pmax, self.params.np)
         
         # Combined z array for convenience
@@ -298,7 +344,7 @@ class Grid3D:
 
 def create_grid_from_config(config, tip_model) -> Grid3D:
     """
-    Create a Grid3D from configuration data.
+    Create a Grid3D from configuration data using Fortran SEMITIP3 grid logic.
     
     Args:
         config: Configuration object
@@ -310,12 +356,55 @@ def create_grid_from_config(config, tip_model) -> Grid3D:
     # Extract grid parameters
     grid_config = config.grid
     
-    # Calculate grid spacing
-    delr = grid_config.radial_extent / (grid_config.radial_points - 1)
+    # Calculate grid spacing following Fortran MultInt3 logic (lines 384-400)
+    # This determines the input spacing parameters DELR0, DELS0 for the tangent formulas
+    
+    # Get depletion width estimate for grid sizing
+    # For now, use simple estimate - full implementation would get from simulation
+    region = config.semiconductor_regions[0]
+    eps = region.permittivity * 8.854e-12  # Approximate EPSILON0
+    doping = abs(region.donor_concentration - region.acceptor_concentration) * 1e6  # to m^-3
+    bias_est = 2.0  # Typical bias voltage for grid sizing
+    if doping > 0:
+        w_depl = np.sqrt(2 * eps * bias_est / (1.602e-19 * doping)) * 1e9  # to nm
+    else:
+        w_depl = 100.0  # Default
+    
+    # SIZE parameter logic from Fortran - should be 0.5 according to fort.9
+    size_factor = getattr(grid_config, 'size_factor', 0.5)  # Default SIZE=0.5
+    
+    if size_factor > 0:
+        # Adaptive sizing based on tip geometry and depletion width
+        delr_base = tip_model.radius
+        if tip_model.protrusion_radius > 0:
+            delr_base = min(tip_model.protrusion_radius, delr_base)
+        delr_base = min(delr_base, w_depl / grid_config.radial_points)
+        delr = delr_base * size_factor
+        
+        dels_base = tip_model.radius  
+        if tip_model.protrusion_radius > 0:
+            dels_base = min(tip_model.protrusion_radius, dels_base)
+        dels_base = min(dels_base, w_depl / grid_config.semiconductor_points)
+        dels = dels_base * size_factor
+    else:
+        # Use fixed values from config (if available)
+        delr = getattr(grid_config, 'radial_spacing', 0.5)  # DELRIN
+        dels = getattr(grid_config, 'semiconductor_spacing', 0.5)  # DELSIN
+    
+    # Vacuum spacing - simplified for now, should implement hyperboloidal
     delv = grid_config.vacuum_extent / (grid_config.vacuum_points - 1)
-    dels = grid_config.semiconductor_extent / (grid_config.semiconductor_points - 1)
-    delp = np.pi / (grid_config.angular_points - 1) if config.mirror_symmetry else \
-           2 * np.pi / (grid_config.angular_points - 1)
+    
+    # Angular spacing (always uniform)
+    if config.mirror_symmetry:
+        delp = np.pi / grid_config.angular_points
+    else:
+        delp = 2 * np.pi / grid_config.angular_points
+    
+    # Update rmax and smax based on calculated spacing and tangent formula
+    # For tangent formula: max = (2*N*del0/π) * tan(π/2) → ∞
+    # But in practice, we use the extent from config as upper limit
+    rmax = grid_config.radial_extent
+    smax = grid_config.semiconductor_extent
     
     # Create parameters
     params = GridParameters(
@@ -323,18 +412,18 @@ def create_grid_from_config(config, tip_model) -> Grid3D:
         nv=grid_config.vacuum_points,
         ns=grid_config.semiconductor_points,
         np=grid_config.angular_points,
-        delr=delr,
+        delr=delr,  # Input spacing parameter (DELR0)
         delv=delv,
-        dels=dels,
+        dels=dels,  # Input spacing parameter (DELS0)
         delp=delp,
-        rmax=grid_config.radial_extent,
+        rmax=rmax,
         vmax=grid_config.vacuum_extent,
-        smax=grid_config.semiconductor_extent,
+        smax=smax,
         mirror_symmetry=config.mirror_symmetry
     )
     
-    # Create grid
-    grid = Grid3D(params)
+    # Create grid with tip model for hyperboloidal coordinates
+    grid = Grid3D(params, tip_model)
     
     # Set tip mask
     grid.set_tip_mask(tip_model)

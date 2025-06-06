@@ -93,9 +93,9 @@ computation:
 
 # 電壓掃描設定
 voltage_scan:
-  points: 2  # 電壓點數 (TEST: only 2 points)
-  start: -1.0  # 起始電壓 (V) (TEST: smaller range)
-  end: 1.0  # 結束電壓 (V) (TEST: smaller range)
+  points: 41  # 電壓點數 (恢復原本設定)
+  start: -2.0  # 起始電壓 (V) 
+  end: 2.0  # 結束電壓 (V)
   modulation_voltage: 0.050  # 調變電壓 (V)
   negative_ramp: 0.0  # V<0 時的 s(V) 斜率 (nm/V)
   positive_ramp: 0.0  # V>0 時的 s(V) 斜率 (nm/V)
