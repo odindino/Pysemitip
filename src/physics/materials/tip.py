@@ -43,9 +43,11 @@ class TipModel:
         
         # Effective tip apex position (accounting for protrusion)
         self.apex_height = self.separation + self.protrusion_radius
-        
-        # Tip potential
-        self.tip_potential = self.bias_voltage + self.contact_potential
+    
+    @property
+    def tip_potential(self) -> float:
+        """Calculate tip potential (BIAS + contact potential)."""
+        return self.bias_voltage + self.contact_potential
     
     def hyperboloid_parameters(self) -> Tuple[float, float, float, float]:
         """
@@ -179,7 +181,7 @@ def create_tip_from_config(config) -> TipModel:
         position=(x_pos, y_pos),
         protrusion_radius=getattr(tip_config, 'protrusion_radius', 0.0),
         work_function=tip_config.work_function,
-        fermi_level=getattr(config, 'tip_fermi_level', 0.0),
-        contact_potential=getattr(config, 'contact_potential', 0.0),
+        fermi_level=getattr(tip_config, 'fermi_energy', 0.0),
+        contact_potential=tip_config.contact_potential,
         bias_voltage=0.0  # Will be set during simulation
     )

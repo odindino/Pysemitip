@@ -390,15 +390,55 @@ class MultIntSimulation:
         return w
     
     def _calculate_energy_range(self, bias_voltage: float) -> Tuple[float, float]:
-        """Calculate appropriate energy range for charge tables."""
-        # Use the estimate_energy_range function
-        bias_range = (min(0, bias_voltage), max(0, bias_voltage))
-        return estimate_energy_range(
-            self.semiconductor_regions,
-            self.surface_regions,
-            self.fermi_level,
-            bias_range
-        )
+        """
+        Calculate appropriate energy range for charge tables following Fortran logic.
+        
+        Based on Fortran MultInt3-6.4.f lines 342-351:
+        ESTART=AMIN1(EF,EF-PotTIP,EN0MIN)
+        EEND=AMAX1(EF,EF-PotTIP,EN0MAX)
+        ETMP=EEND-ESTART
+        ESTART=ESTART-2.*ETMP
+        EEND=EEND+2.*ETMP
+        """
+        # Get tip potential (BIAS + contact potential)
+        tip_potential = self.tip.tip_potential
+        
+        # Get surface state energy ranges (EN0MIN, EN0MAX)
+        en0_min = float('inf')
+        en0_max = float('-inf')
+        
+        for region in self.surface_regions:
+            if hasattr(region, 'distribution1') and region.distribution1:
+                d1 = region.distribution1
+                if d1.density > 0:
+                    en0_min = min(en0_min, d1.center_energy - 3 * max(d1.fwhm, 0.1))
+                    en0_max = max(en0_max, d1.center_energy + 3 * max(d1.fwhm, 0.1))
+            
+            if hasattr(region, 'distribution2') and region.distribution2:
+                d2 = region.distribution2
+                if d2.density > 0:
+                    en0_min = min(en0_min, d2.center_energy - 3 * max(d2.fwhm, 0.1))
+                    en0_max = max(en0_max, d2.center_energy + 3 * max(d2.fwhm, 0.1))
+        
+        # Handle case where no surface states are defined
+        if en0_min == float('inf'):
+            en0_min = -1.0  # Default minimum
+        if en0_max == float('-inf'):
+            en0_max = 2.0   # Default maximum
+        
+        # Fortran logic: ESTART=AMIN1(EF,EF-PotTIP,EN0MIN)
+        ef_minus_tip = self.fermi_level - tip_potential
+        estart = min(self.fermi_level, ef_minus_tip, en0_min)
+        
+        # Fortran logic: EEND=AMAX1(EF,EF-PotTIP,EN0MAX)
+        eend = max(self.fermi_level, ef_minus_tip, en0_max)
+        
+        # Fortran logic: expand range by factor of 2
+        etmp = eend - estart
+        estart = estart - 2.0 * etmp
+        eend = eend + 2.0 * etmp
+        
+        return (estart, eend)
     
     def _get_grid_sequence(self) -> List[Tuple[int, int, int, int]]:
         """
