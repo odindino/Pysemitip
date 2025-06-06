@@ -415,7 +415,13 @@ class PoissonSolver:
                 
                 # Debug: check if potential is changing
                 if i == 0 and k == 0:  # Central point
-                    print(f"  Surface debug: old={surf_old:.6f}, new={surf_new:.6f}, rho_surf={surface_charge_func(r, phi, surf_old):.2e}")
+                    rho_surf_old = surface_charge_func(r, phi, surf_old)
+                    rho_surf_new = surface_charge_func(r, phi, surf_new)
+                    residual_old = surface_residual(surf_old)
+                    residual_new = surface_residual(surf_new)
+                    print(f"  Surface GSECT: old={surf_old:.6f}, new={surf_new:.6f}, change={abs(surf_new-surf_old):.2e}")
+                    print(f"    rho_surf: old={rho_surf_old:.2e}, new={rho_surf_new:.2e}")
+                    print(f"    residual: old={residual_old:.2e}, new={residual_new:.2e}")
                 
                 # Average old and new (Fortran style)
                 self.potential_int[i, k] = (surf_old + surf_new) / 2.0
@@ -471,6 +477,12 @@ class PoissonSolver:
                     if abs(denom) < 1e-15:  # Avoid division by zero
                         continue
                     
+                    # Calculate linear solution first (Fortran SEMNEW = TEMP/DENOM)
+                    # This assumes zero charge density for the linear solution
+                    rho_linear = 0.0  # Linear approximation
+                    temp_linear = stemp - rho_linear * eep / 12.9  # eps_semi = 12.9
+                    sem_new_linear = temp_linear / denom
+                    
                     # Nonlinear solver using golden section search
                     def bulk_residual(pot_test):
                         """Residual function for bulk potential."""
@@ -479,15 +491,18 @@ class PoissonSolver:
                         new_pot = temp / denom
                         return abs(pot_test - new_pot)
                     
-                    # Set search bounds (exact Fortran DELSEM)
-                    bias = self.tip.bias_voltage
-                    delta_sem = max(1e-6, abs(bias) / 1e6)  # Exact Fortran DELSEM
-                    sem_min = sem_old - delta_sem
-                    sem_max = sem_old + delta_sem
+                    # Set search bounds (correct Fortran approach)
+                    # Use sem_old and sem_new_linear as bounds (SEMOLD, SEMNEW)
+                    sem_min = min(sem_old, sem_new_linear)
+                    sem_max = max(sem_old, sem_new_linear)
                     
-                    # Use golden section search
+                    # delta_sem is used only as convergence tolerance
+                    bias = self.tip.bias_voltage
+                    delta_sem = max(1e-6, abs(bias) / 1e6)  # Convergence tolerance only
+                    
+                    # Use golden section search with correct bounds
                     sem_new = golden_section_search(bulk_residual, sem_min, sem_max, 
-                                                   self.params.golden_section_tolerance)
+                                                   delta_sem)  # Use delta_sem as tolerance
                     
                     # Average old and new (Fortran style)
                     new_potential[i, j, k] = (sem_old + sem_new) / 2.0
