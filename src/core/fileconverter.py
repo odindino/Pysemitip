@@ -114,9 +114,9 @@ class Fort9ToYamlConverter:
                 'acceptor_binding_energy': self._parse_value(lines[idx + 5]),
                 'effective_mass': {
                     'conduction_band': self._parse_value(lines[idx + 6]),
-                    'heavy_hole': self._parse_value(lines[idx + 7]),
-                    'light_hole': self._parse_value(lines[idx + 8]),
-                    'split_off_hole': self._parse_value(lines[idx + 9]),
+                    'valence_band_heavy': self._parse_value(lines[idx + 7]),
+                    'valence_band_light': self._parse_value(lines[idx + 8]),
+                    'split_off': self._parse_value(lines[idx + 9]),
                 },
                 'spin_orbit_splitting': self._parse_value(lines[idx + 10]),
                 'degeneracy_indicator': self._parse_value(lines[idx + 11]),
@@ -140,13 +140,13 @@ class Fort9ToYamlConverter:
                     'density': self._parse_value(lines[idx]),
                     'neutrality_level': self._parse_value(lines[idx + 1]),
                     'fwhm': self._parse_value(lines[idx + 2]),
-                    'centroid_energy': self._parse_value(lines[idx + 3]),
+                    'center_energy': self._parse_value(lines[idx + 3]),
                 },
                 'second_distribution': {
                     'density': self._parse_value(lines[idx + 4]),
                     'neutrality_level': self._parse_value(lines[idx + 5]),
                     'fwhm': self._parse_value(lines[idx + 6]),
-                    'centroid_energy': self._parse_value(lines[idx + 7]),
+                    'center_energy': self._parse_value(lines[idx + 7]),
                 }
             }
             idx += 8
@@ -240,8 +240,8 @@ class Fort9ToYamlConverter:
             },
             'voltage_scan': {
                 'points': num_voltage_points,
-                'start_voltage': voltage_array[0] if voltage_array else start_voltage,
-                'end_voltage': voltage_array[-1] if voltage_array else 2.0,
+                'start': voltage_array[0] if voltage_array else start_voltage,
+                'end': voltage_array[-1] if voltage_array else 2.0,
                 'modulation_voltage': modulation_voltage,
                 'negative_ramp': negative_ramp,
                 'positive_ramp': positive_ramp
@@ -295,9 +295,9 @@ class Fort9ToYamlConverter:
                 'acceptor_binding_energy': self._parse_value(lines[idx + 5]),
                 'effective_mass': {
                     'conduction_band': self._parse_value(lines[idx + 6]),
-                    'heavy_hole': self._parse_value(lines[idx + 7]),
-                    'light_hole': self._parse_value(lines[idx + 8]),
-                    'split_off_hole': self._parse_value(lines[idx + 9]),
+                    'valence_band_heavy': self._parse_value(lines[idx + 7]),
+                    'valence_band_light': self._parse_value(lines[idx + 8]),
+                    'split_off': self._parse_value(lines[idx + 9]),
                 },
                 'spin_orbit_splitting': self._parse_value(lines[idx + 10]),
                 'degeneracy_indicator': self._parse_value(lines[idx + 11]),
@@ -321,13 +321,13 @@ class Fort9ToYamlConverter:
                     'density': self._parse_value(lines[idx]),
                     'neutrality_level': self._parse_value(lines[idx + 1]),
                     'fwhm': self._parse_value(lines[idx + 2]),
-                    'centroid_energy': self._parse_value(lines[idx + 3]),
+                    'center_energy': self._parse_value(lines[idx + 3]),
                 },
                 'second_distribution': {
                     'density': self._parse_value(lines[idx + 4]),
                     'neutrality_level': self._parse_value(lines[idx + 5]),
                     'fwhm': self._parse_value(lines[idx + 6]),
-                    'centroid_energy': self._parse_value(lines[idx + 7]),
+                    'center_energy': self._parse_value(lines[idx + 7]),
                 }
             }
             idx += 8
