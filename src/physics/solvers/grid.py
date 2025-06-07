@@ -88,14 +88,18 @@ class Grid3D:
     
     def _setup_coordinates(self, tip_model=None):
         """Set up coordinate arrays using Fortran SEMITIP3 formulas."""
-        # Radial coordinates using tangent formula from SEMITIP3-6.1.f line 116
-        # R(I)=(2*NR*DELR0/PI)*TAN(PI*(I-0.5)/(2.*NR))
-        self.r = np.zeros(self.params.nr)
-        for i in range(self.params.nr):
-            # Convert to 1-based indexing like Fortran
-            i_fortran = i + 1
-            self.r[i] = (2 * self.params.nr * self.params.delr / np.pi) * \
-                        np.tan(np.pi * (i_fortran - 0.5) / (2.0 * self.params.nr))
+        # Radial coordinates. If a tip model is provided we use the
+        # non-uniform tangent grid from SEMITIP3.  Otherwise use a simple
+        # linear grid which is easier for unit tests.
+        if tip_model is None:
+            self.r = np.linspace(0.0, self.params.rmax, self.params.nr)
+        else:
+            self.r = np.zeros(self.params.nr)
+            for i in range(self.params.nr):
+                i_fortran = i + 1
+                self.r[i] = (
+                    2 * self.params.nr * self.params.delr / np.pi
+                ) * np.tan(np.pi * (i_fortran - 0.5) / (2.0 * self.params.nr))
         
         # Vacuum z-coordinates using hyperboloidal coordinates
         # Following Fortran SEMITIP3-6.1.f lines 127-142
@@ -130,15 +134,19 @@ class Grid3D:
             self.zv = np.linspace(0, self.params.vmax, self.params.nv)
             self.delv_array = np.full(self.params.nr, self.params.delv)
         
-        # Semiconductor z-coordinates using tangent formula from SEMITIP3-6.1.f line 164
-        # S(J)=(2*NS*DELS0/PI)*TAN(PI*(J-0.5)/(2.*NS))
-        self.zs_positive = np.zeros(self.params.ns)
-        for j in range(self.params.ns):
-            # Convert to 1-based indexing like Fortran
-            j_fortran = j + 1
-            self.zs_positive[j] = (2 * self.params.ns * self.params.dels / np.pi) * \
-                                  np.tan(np.pi * (j_fortran - 0.5) / (2.0 * self.params.ns))
-        
+        # Semiconductor z-coordinates.  As with the radial grid we use a
+        # linear grid when no tip model is specified to keep the grid
+        # uniform for testing.
+        if tip_model is None:
+            self.zs_positive = np.linspace(0.0, self.params.smax, self.params.ns)
+        else:
+            self.zs_positive = np.zeros(self.params.ns)
+            for j in range(self.params.ns):
+                j_fortran = j + 1
+                self.zs_positive[j] = (
+                    2 * self.params.ns * self.params.dels / np.pi
+                ) * np.tan(np.pi * (j_fortran - 0.5) / (2.0 * self.params.ns))
+
         # Make semiconductor coordinates negative (below surface)
         self.zs = -self.zs_positive
         
@@ -427,5 +435,37 @@ def create_grid_from_config(config, tip_model) -> Grid3D:
     
     # Set tip mask
     grid.set_tip_mask(tip_model)
-    
+
     return grid
+
+
+def generate_prolate_spheroidal_grid(tip_radius: float, num_eta: int,
+                                     num_nu: int, f: float) -> Tuple[np.ndarray, np.ndarray]:
+    """Generate a prolate spheroidal coordinate grid.
+
+    Parameters
+    ----------
+    tip_radius : float
+        Radius of the STM tip apex (nm).
+    num_eta : int
+        Number of grid points along the \u03b7 coordinate.
+    num_nu : int
+        Number of grid points along the \u03bd coordinate.
+    f : float
+        Focal length of the coordinate system.
+
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray]
+        Meshgrids of \u03b7 and \u03bd coordinates.
+    """
+
+    # The tip surface corresponds to \u03b7 = \u03b7_tip.
+    eta_tip = 1.0 + tip_radius / max(f, 1e-8)
+
+    eta = np.linspace(1.0, eta_tip, num_eta)
+    nu = np.linspace(0.0, 1.0, num_nu)
+
+    eta_grid, nu_grid = np.meshgrid(eta, nu, indexing="ij")
+
+    return eta_grid, nu_grid

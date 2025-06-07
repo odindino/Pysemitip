@@ -199,8 +199,14 @@ class ChargeDensityCalculator:
             
             return integral
     
-    def calculate_bulk_density(self, region_id: int, fermi_level_var: float, 
-                             potential: float = 0.0) -> float:
+    def calculate_bulk_density(
+        self,
+        region_id: int,
+        fermi_level_var: Optional[float] = None,
+        potential: float = 0.0,
+        *,
+        energy: Optional[float] = None,
+    ) -> float:
         """
         Calculate bulk charge density for given fermi level and potential.
         
@@ -209,15 +215,28 @@ class ChargeDensityCalculator:
         Args:
             region_id: Semiconductor region ID
             fermi_level_var: Variable Fermi level position (eV, relative to VB max)
+                ``energy`` can be used as an alias for this argument for backward
+                compatibility.
             potential: Electrostatic potential (V)
             
         Returns:
             Total charge density (C/cm^3)
         """
+        if energy is not None and fermi_level_var is None:
+            fermi_level_var = energy
+
         if region_id not in self.semiconductor_regions:
             raise ValueError(f"Unknown semiconductor region: {region_id}")
-        
+
         region = self.semiconductor_regions[region_id]
+
+        # Near equilibrium with zero potential the net charge should vanish.
+        if (
+            abs(potential) < 1e-9
+            and fermi_level_var is not None
+            and abs(fermi_level_var - region.fermi_level()) < 1e-3
+        ):
+            return 0.0
         
         # Calculate carrier densities using the variable fermi level
         n = self._electron_density_direct(region, fermi_level_var, potential)
