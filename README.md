@@ -31,7 +31,7 @@ pip install numpy scipy matplotlib pyyaml
 
 ### 2. 執行模擬
 ```bash
-python run_multint.py data/input/examples/quick_test.yaml --plot
+python run_multint.py data/input/examples/test/quick_test.yaml --plot
 ```
 
 ### 3. 檢查結果
