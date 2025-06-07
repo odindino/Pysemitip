@@ -173,9 +173,10 @@ class PoissonSolver:
         for i in range(1, self.grid.params.nr):
             self.r_coeff[i] = 1.0 / (2.0 * dr * self.grid.r[i])
     
-    def solve(self, charge_density_func: Callable, 
+    def solve(self, charge_density_func: Callable,
               surface_charge_func: Callable,
-              initial_guess: Optional[np.ndarray] = None) -> Tuple[np.ndarray, dict]:
+              initial_guess_data: Optional[Tuple[Optional[np.ndarray], Optional['GridParameters']]] = None
+              ) -> Tuple[np.ndarray, dict]:
         """
         Solve the Poisson equation using Fortran SEMITIP3 algorithm.
         
@@ -186,15 +187,26 @@ class PoissonSolver:
                                 Args: (r, z, phi, potential) -> rho
             surface_charge_func: Function to calculate surface charge density
                                 Args: (r, phi, potential) -> sigma
-            initial_guess: Initial potential distribution
+            initial_guess_data: Tuple of (coarse_potential_array, coarse_grid_params).
+                                If None, or coarse_potential_array is None, uses default initial potential.
+                                If coarse_grid_params is None, assumes coarse_potential_array is for current grid.
             
         Returns:
             Tuple of (converged potential, convergence info dict)
         """
         # Initialize potential
-        if initial_guess is not None:
-            self._set_potential_from_array(initial_guess)
-        else:
+        if initial_guess_data is not None:
+            coarse_potential_array, coarse_grid_params = initial_guess_data
+            if coarse_potential_array is not None:
+                if coarse_grid_params is not None and coarse_grid_params.nr != self.grid.params.nr: # Check if grids differ
+                    print(f"Prolonging potential from coarse grid {coarse_grid_params.nr}x{coarse_grid_params.nv+coarse_grid_params.ns-1} to fine grid {self.grid.params.nr}x{self.grid.params.nv+self.grid.params.ns-1}")
+                    self._prolong_potential(coarse_potential_array, coarse_grid_params, self.grid.params)
+                else: # Coarse_grid_params is None or same as current grid, assume direct use
+                    print(f"Using initial guess on the same grid dimensions.")
+                    self._set_potential_from_array(coarse_potential_array)
+            else: # coarse_potential_array is None
+                self._set_initial_potential()
+        else: # initial_guess_data is None
             self._set_initial_potential()
         
         # Convergence tracking (Fortran style)
@@ -295,8 +307,10 @@ class PoissonSolver:
         
         # Update vacuum region (Fortran lines 446-567)
         for k in range(np_):
-            for i in range(nr):
-                for j in range(1, nv - 1):  # Skip boundaries
+            # The loop for 'i' should go up to nr-2 (i.e., range(nr-1))
+            # to exclude the outer radial boundary i=nr-1 if it's a fixed Dirichlet boundary.
+            for i in range(nr - 1):
+                for j in range(1, nv - 1):  # Skip j boundaries (interface and far vacuum)
                     # Skip if inside tip
                     if self.grid.tip_mask[i, j, k]:
                         continue
@@ -517,45 +531,189 @@ class PoissonSolver:
         """Set initial potential distribution following Fortran SEMITIP3."""
         # Set tip potential in vacuum (Fortran lines 195-206)
         tip_potential = self.tip.tip_potential
-        
-        # Vacuum region: Initialize with logarithmic potential (Fortran style)
-        for k in range(self.grid.params.np):
-            for i in range(self.grid.params.nr):
-                # Find where tip ends in vacuum
-                j_tip_end = 0
-                for j in range(self.grid.params.nv - 1, 0, -1):
-                    if not self.grid.tip_mask[i, j, k]:
-                        j_tip_end = j
-                        break
-                
-                # Set initial guess (Fortran lines 198-204)
-                for j in range(j_tip_end, 0, -1):
-                    if not self.grid.tip_mask[i, j, k]:
-                        # Logarithmic decay from tip (matching Fortran)
-                        eta = j * self.eta / float(j_tip_end + 1)
-                        if eta < 0.99:  # Avoid singularity
-                            cetat = np.log((1. + self.eta) / (1. - self.eta))
-                            potential = tip_potential * np.log((1. + eta) / (1. - eta)) / cetat
-                        else:
-                            potential = tip_potential * 0.1  # Small value near boundaries
-                        self.potential_vac[i, j, k] = potential
+        ETAT = self.eta  # This is the tip's hyperboloid parameter
+        NV = self.grid.params.nv
+        NR = self.grid.params.nr
+        NP = self.grid.params.np
+
+        if NV == 0: # Should not happen with valid grid params
+            # Or handle as error, for now fill with tip_potential if vacuum region exists
+            if self.potential_vac is not None:
+                 self.potential_vac.fill(tip_potential)
+        else:
+            deleta = ETAT / float(NV)
+
+            # Pre-calculate denominator for log formula
+            log_ETAT_term_numerator = (1. + ETAT)
+            log_ETAT_term_denominator = (1. - ETAT)
+
+            if log_ETAT_term_denominator <= 1e-9: # ETAT is very close to 1 or >= 1
+                cetat_inv = 0 # Formula is ill-defined or ETAT is too large
+            else:
+                log_ETAT_term = log_ETAT_term_numerator / log_ETAT_term_denominator
+                if log_ETAT_term <= 0:
+                    cetat_inv = 0 # Avoid log(<=0)
+                else:
+                    log_cetat = np.log(log_ETAT_term)
+                    if abs(log_cetat) < 1e-9: # Denominator is close to zero
+                        cetat_inv = 0 # effectively, potential will be tip_potential
                     else:
-                        # Inside tip
-                        self.potential_vac[i, j, k] = tip_potential
+                        cetat_inv = 1.0 / log_cetat
+
+            for k_idx in range(NP):
+                for i_idx in range(NR):
+                    for j_python in range(NV): # j_python is 0 to NV-1 (interface to far vacuum)
+                        if self.grid.tip_mask[i_idx, j_python, k_idx]:
+                            self.potential_vac[i_idx, j_python, k_idx] = tip_potential
+                        else:
+                            j_fortran = j_python + 1 # Fortran index for eta calculation (1 to NV)
+                            eta_coord = j_fortran * deleta
+
+                            # Ensure eta_coord is strictly less than ETAT for the formula
+                            # Using a small factor like 0.99999 to avoid floating point issues at eta_coord == ETAT
+                            if eta_coord < ETAT * 0.999999 and cetat_inv != 0:
+                                log_eta_coord_term_numerator = (1. + eta_coord)
+                                log_eta_coord_term_denominator = (1. - eta_coord)
+
+                                if log_eta_coord_term_denominator <= 1e-9: # eta_coord is very close to 1
+                                    # This case implies potential should be tip_potential or very close
+                                    self.potential_vac[i_idx, j_python, k_idx] = tip_potential
+                                else:
+                                    log_eta_coord_term = log_eta_coord_term_numerator / log_eta_coord_term_denominator
+                                    if log_eta_coord_term <= 0:
+                                        # Fallback if term is problematic (e.g. eta_coord >= 1)
+                                        self.potential_vac[i_idx, j_python, k_idx] = tip_potential
+                                    else:
+                                        potential = tip_potential * np.log(log_eta_coord_term) * cetat_inv
+                                        self.potential_vac[i_idx, j_python, k_idx] = potential
+                            else:
+                                # If eta_coord >= ETAT or cetat_inv is 0 (ETAT is problematic)
+                                # point is effectively at or beyond the tip's reference hyperboloid for this guess
+                                self.potential_vac[i_idx, j_python, k_idx] = tip_potential
         
         # Semiconductor region: Start with zero (Fortran lines 170-178)
         self.potential_sem.fill(0.0)
         
         # Interface: Initialize to zero following Fortran IINIT=1 logic
         # Fortran SEMITIP3-6.1.f lines 155-162: VSINT(1,I,K)=0.
-        # This allows the solver to find the correct equilibrium state
         self.potential_int.fill(0.0)
         
+        # Set far-field boundary conditions explicitly as per typical SEMITIP3 for IINIT=1
+        # These are typically Dirichlet boundaries for the initial guess.
+        if self.potential_vac is not None and self.potential_vac.size > 0:
+            if NV > 0:
+                self.potential_vac[:, -1, :] = 0.0  # Top vacuum boundary (j_python = NV-1) to 0
+            if NR > 0:
+                self.potential_vac[-1, :, :] = 0.0  # Outer radial vacuum boundary (i_idx = NR-1) to 0
+
+        if self.potential_sem is not None and self.potential_sem.size > 0:
+            NS = self.grid.params.ns
+            if NR > 0:
+                self.potential_sem[-1, :, :] = 0.0  # Outer radial semiconductor boundary to 0
+            if NS > 0:
+                self.potential_sem[:, -1, :] = 0.0  # Deep semiconductor boundary (z -> -inf) to 0
+
         print(f"Initialized interface potential to zero (Fortran IINIT=1 style)")
-        
+        print(f"Applied far-field zero boundary conditions for initial potential.")
+
         # Update full potential array
         self._update_full_potential()
-    
+
+    def _prolong_potential(self, coarse_potential_full: np.ndarray,
+                           coarse_params: 'GridParameters',
+                           fine_params: 'GridParameters'):
+        """
+        Initialize potential on the current fine grid from a coarser grid solution.
+        Uses simple injection for now (coarse[i] -> fine[2i]).
+        Assumes dimensions are approximately doubled.
+        """
+        print(f"  Prolongation: Coarse ({coarse_params.nr},{coarse_params.nv},{coarse_params.ns},{coarse_params.np}) to Fine ({fine_params.nr},{fine_params.nv},{fine_params.ns},{fine_params.np})")
+
+        # Deconstruct coarse_potential_full into vac, sem, int parts
+        # This logic is reverse of _update_full_potential or similar to _set_potential_from_array
+
+        # coarse_potential_full has shape (NR_c, NV_c + NS_c - 1, NP_c)
+        # self.potential_vac has shape (NR_f, NV_f, NP_f)
+        # self.potential_sem has shape (NR_f, NS_f, NP_f)
+        # self.potential_int has shape (NR_f, NP_f)
+
+        # Approximate scaling factors (should be close to 2)
+        scale_nr = fine_params.nr / coarse_params.nr
+        scale_nv = fine_params.nv / coarse_params.nv
+        scale_ns = fine_params.ns / coarse_params.ns
+        scale_np = fine_params.np / coarse_params.np
+
+        # Initialize fine potentials to zero or some default
+        self.potential_vac.fill(0.0)
+        self.potential_sem.fill(0.0)
+        self.potential_int.fill(0.0)
+
+        # Simplified injection:
+        # Iterate over coarse grid indices
+        for ic in range(coarse_params.nr):
+            ifc = int(ic * scale_nr) # Map to fine grid index
+            if ifc >= fine_params.nr: continue
+
+            for kpc in range(coarse_params.np):
+                kfpc = int(kpc * scale_np)
+                if kfpc >= fine_params.np: continue
+
+                # Interface potential
+                # coarse_potential_full[:, coarse_ns-1, :] is coarse interface
+                self.potential_int[ifc, kfpc] = coarse_potential_full[ic, coarse_params.ns - 1, kpc]
+
+                # Semiconductor part (excluding interface)
+                # coarse_potential_full[:, :coarse_ns-1, :] is coarse semiconductor (flipped)
+                # self.potential_sem[:, 1:, :] is fine semiconductor bulk (flipped in _set_potential_from_array)
+                for jsc in range(coarse_params.ns -1): # Iterate 0 to NS_c-2 (bulk coarse points)
+                    jsfc = int((jsc + 1) * scale_ns) # Map to fine grid index (from 1 to NS_f-1 for bulk)
+                    if jsfc >= fine_params.ns: continue
+                    # coarse_potential_full is indexed [r, z_combined, p]
+                    # z_combined for sem runs from 0 (deepest) to ns-2 (near interface)
+                    # self.potential_sem is indexed [r, z_sem_idx, p] where z_sem_idx 0 is interface, ns-1 is deep
+                    # coarse_potential_full[ic, jsc, kpc] corresponds to coarse_sem_bulk[ic, jsc_flipped, kpc]
+                    # coarse_sem_bulk has ns-1 points. zs_idx_coarse_flipped = (coarse_params.ns-2) - jsc
+                    idx_coarse_z_in_full_array = jsc # This is index in the coarse_potential_full sem part
+                    self.potential_sem[ifc, jsfc, kfpc] = coarse_potential_full[ic, idx_coarse_z_in_full_array, kpc]
+
+
+                # Vacuum part (excluding interface)
+                # coarse_potential_full[:, coarse_ns:, :] is coarse vacuum
+                # self.potential_vac[:, 1:, :] is fine vacuum bulk
+                for jvc in range(coarse_params.nv -1): # Iterate 0 to NV_c-2 (bulk coarse points in vac part of full)
+                    jvfc = int((jvc + 1) * scale_nv) # Map to fine grid index (from 1 to NV_f-1 for bulk)
+                    if jvfc >= fine_params.nv: continue
+                    idx_coarse_z_in_full_array = coarse_params.ns + jvc
+                    self.potential_vac[ifc, jvfc, kfpc] = coarse_potential_full[ic, idx_coarse_z_in_full_array, kpc]
+
+        # Ensure interface values are consistent between sem and vac arrays on fine grid
+        self.potential_vac[:, 0, :] = self.potential_int
+        self.potential_sem[:, 0, :] = self.potential_int
+
+        # Apply boundary conditions that might have been overwritten or not set by injection
+        # Using similar logic from _set_initial_potential for far-field boundaries
+        if fine_params.nv > 0:
+            self.potential_vac[:, -1, :] = 0.0  # Top vacuum boundary
+        if fine_params.nr > 0:
+            self.potential_vac[-1, :, :] = 0.0  # Outer radial vacuum boundary
+
+        if fine_params.nr > 0:
+            self.potential_sem[-1, :, :] = 0.0  # Outer radial semiconductor boundary
+        if fine_params.ns > 0:
+            self.potential_sem[:, -1, :] = 0.0  # Deep semiconductor boundary
+
+        # Tip interior should be set to tip_potential
+        tip_potential = self.tip.tip_potential
+        for k_idx in range(fine_params.np):
+            for i_idx in range(fine_params.nr):
+                for j_python in range(fine_params.nv):
+                    if self.grid.tip_mask[i_idx, j_python, k_idx]:
+                        self.potential_vac[i_idx, j_python, k_idx] = tip_potential
+
+        self._update_full_potential() # Ensure self.potential_full is updated
+        print(f"  Prolongation completed. Band bending after prolong: {self.get_band_bending():.6f}")
+
+
     def _update_potential_sor(self, charge_density_func: Callable,
                             surface_charge_func: Callable):
         """

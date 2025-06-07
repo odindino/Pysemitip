@@ -527,7 +527,24 @@ class ChargeDensityCalculator:
             
             bulk_tables[region_id] = densities
             print(f"  Region {region_id}: density range {np.min(densities):.3e} to {np.max(densities):.3e}")
-        
+
+            # ADDED DEBUG LOGGING FOR REGION 1
+            if region_id == 1: # Assuming region 1 is our primary region of interest
+                # The 'fermi_levels' array is equivalent to the energy array for the table
+                print(f"DEBUG: Bulk Charge Table for Region 1 (first 10 points):")
+                for i in range(min(10, num_points)):
+                    print(f"  Energy: {fermi_levels[i]:.6f} eV, Density: {densities[i]:.6e} C/cm^3")
+                if num_points > 20: # Only print last 10 if there are more than 20 points
+                    print(f"DEBUG: Bulk Charge Table for Region 1 (last 10 points):")
+                    # Corrected loop range for last 10 points
+                    for i in range(max(min(10, num_points), num_points - 10), num_points):
+                        print(f"  Energy: {fermi_levels[i]:.6f} eV, Density: {densities[i]:.6e} C/cm^3")
+                elif num_points > 10: # If less than 20 but more than 10, print remaining
+                    print(f"DEBUG: Bulk Charge Table for Region 1 (remaining points):")
+                    for i in range(10, num_points):
+                         print(f"  Energy: {fermi_levels[i]:.6f} eV, Density: {densities[i]:.6e} C/cm^3")
+                print(f"DEBUG: Region 1 Min Density: {np.min(densities):.6e}, Max Density: {np.max(densities):.6e}")
+
         # Create surface tables - following Fortran SURFRHO
         surface_tables = {}
         for area_id, region in self.surface_regions.items():

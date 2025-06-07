@@ -299,86 +299,216 @@ class MultIntSimulation:
         self._current_charge_tables = charge_tables
         
         # Multi-grid solution sequence
-        solution_3d = None
+        # solution_3d_coarse stores the potential from the previous (coarser) grid stage
+        solution_3d_coarse = None
+        previous_stage_grid_params = None # Stores GridParameters of the coarser grid
+
         grid_sequence = self._get_grid_sequence()
         
-        for grid_level, (nr, nv, ns, np) in enumerate(grid_sequence):
-            self.output_file.write(f"NR,NS,NV,NP = {nr} {ns} {nv} {np}\n")
-            
-            # Calculate grid spacing for this level (following Fortran doubling logic)
-            # Each stage halves the spacing as grid dimensions double
-            spacing_factor = 2.0 ** grid_level
-            delr = self.grid.params.delr / spacing_factor  # Input parameter halved each stage
-            dels = self.grid.params.dels / spacing_factor  # Input parameter halved each stage
-            delv = self.grid.params.delv / spacing_factor  # TODO: Should be hyperboloidal
-            delp = self.grid.params.delp / spacing_factor  # Angular spacing halved each stage
-            
-            self.output_file.write(f"DELR,DELS,DELV,DELP = {delr:.5f} {dels:.5f} {delv:.5f} {delp:.5f}\n")
-            
-            # Show largest radius and depth like Fortran (scales with finer grid)
-            if hasattr(self.grid, 'r') and len(self.grid.r) > 0:
-                # Estimate maximum coordinates for this grid level
-                # Finer grids have larger coordinate ranges
-                rmax = self.grid.r[-1] * spacing_factor
-                smax = (self.grid.zs_positive[-1] if hasattr(self.grid, 'zs_positive') 
-                       and len(self.grid.zs_positive) > 0 else self.grid.params.smax) * spacing_factor
+        # Base delr, dels for the tangent formula are from the initial grid configuration
+        # These are used as DELR0, DELS0 in the Fortran tangent formula for r and s coordinates.
+        # The Grid3D constructor takes these base values.
+        # For multi-grid, these base values themselves are scaled.
+        base_delr_config = self.grid.params.delr
+        base_dels_config = self.grid.params.dels
+        base_delv_config = self.grid.params.delv # This is for linear vacuum grid; hyperboloidal is handled by Grid3D
+        base_delp_config = self.grid.params.delp
+        # Base extents from the initial full grid configuration
+        base_rmax_config = self.grid.params.rmax
+        base_vmax_config = self.grid.params.vmax
+        base_smax_config = self.grid.params.smax
+
+        for grid_level, (nr_stage, nv_stage, ns_stage, np_stage) in enumerate(grid_sequence):
+            self.output_file.write(f"NR,NS,NV,NP = {nr_stage} {ns_stage} {nv_stage} {np_stage}\n")
+
+            # Calculate grid spacing and extents for this level
+            # spacing_factor = 2.0 ** grid_level # This was used to scale from finest to current
+            # For multi-grid, delr, dels, etc. usually refer to the actual spacing of the current grid.
+            # However, our Grid3D uses delr/dels as input to tangent formula (like DELR0, DELS0)
+            # The Fortran code effectively scales these DELR0, DELS0 by 1/(2^level)
+
+            # Effective DELR0, DELS0 for the tangent formula at this grid level
+            # If grid_level 0 is coarsest, then factor is 2.0**(num_levels - 1 - grid_level)
+            # If grid_level 0 is finest (as current self.grid is), then factor is 1.0 / (2.0**grid_level_from_finest)
+            # The current grid_sequence starts coarse and goes fine.
+            # So, for grid_level 0 (coarsest in sequence), spacing is largest.
+            # Let's assume grid_sequence[0] is the coarsest.
+            # The scaling factor should be relative to the *initial* finest grid parameters.
+            # The `grid_sequence` gives absolute number of points for current stage.
+            # `self.grid.params` refers to the *initial* (usually finest) grid.
+
+            # Let's assume the delr, dels, delv, delp in self.grid.params are for the *finest* grid.
+            # The scaling factor for DELR0, DELS0, etc. needs to be determined based on
+            # how many "doubling" steps coarser the current stage is from the finest.
+            # Example: finest is 64x64. Stage 0 is 16x16 (2 doublings away). Factor = 2^2 = 4.
+            # Stage 1 is 32x32 (1 doubling away). Factor = 2^1 = 2.
+            # Stage 2 is 64x64 (0 doublings away). Factor = 2^0 = 1.
+            num_stages = len(grid_sequence)
+            # grid_level goes from 0 (coarsest) to num_stages-1 (finest)
+            # Let's say finest_nr = self.grid.params.nr
+            # current_nr = nr_stage
+            # scaling_factor_nr = finest_nr / current_nr (assuming powers of 2)
+            # This scaling_factor is for the number of points.
+            # The DELR0, DELS0 for tangent formula scale inversely with number of points for same extent
+            # OR, if extent also scales, it's more complex.
+
+            # The existing delr, dels, delv, delp calculations in the loop header are correct for *actual spacing*.
+            # We need to pass these to GridParameters.
+            spacing_factor_for_actual_spacing = 2.0 ** (num_stages - 1 - grid_level) # if grid_level 0 is coarsest
+
+            # Recalculate delr, dels, delv, delp based on the *initial grid's parameters*
+            # These are the DELR0, DELS0, etc. for the current stage.
+            # The current `grid_sequence` starts with the coarsest grid.
+            # `self.grid` is the initial grid, usually the finest.
+            # Let's find the scaling factor from the current stage to the reference (finest) grid.
+            # If nr_stage is nr_finest / K, then delr_for_tangent_formula_stage = delr_finest / K
+
+            # The parameters `delr`, `dels`, `delv`, `delp` calculated in the loop were the *actual* cell sizes.
+            # GridParameters expects the DELR0, DELS0 type values for tangent formula.
+            # The existing code was: `delr = self.grid.params.delr / spacing_factor` where spacing_factor
+            # was relative to the current `grid_level` assuming `self.grid.params.delr` was for level 0.
+            # This interpretation needs to be fixed. `self.grid` is the full grid.
+
+            # Let's use the number of points to derive the scaling for DELR0, DELS0.
+            # If nr_stage = self.grid.params.nr / K, then current_delr0 = self.grid.params.delr / K
+            # This assumes rmax, smax, vmax are kept constant across stages for the tangent formula scaling.
+            # The rmax, smax, vmax in the loop are *effective extents* which grow for finer actual spacing.
+
+            # Simplification: Assume the `delr, dels, delv, delp` calculated in the loop are correct *inputs*
+            # for the GridParameters of the current stage.
+            # This means Grid3D's tangent formula will use these as the "base" spacings for that stage.
+
+            # Calculate actual cell spacings for the current stage
+            # This logic appears to assume self.grid.params are for the *coarsest* grid in the sequence.
+            # Let's correct this. self.grid.params should be for the *reference* (usually finest) grid.
+            # The grid_sequence defines N_stage. We need DEL_stage.
+            # DEL_stage = RMAX_stage / N_stage (for linear)
+            # For tangent, DEL0_stage is such that R(N_stage, DEL0_stage) = RMAX_stage.
+            # R(I) = (2*N*DEL0/PI)*TAN(PI*(I-0.5)/(2.*N))
+            # RMAX = R(N) = (2*N*DEL0/PI)*TAN(PI*(N-0.5)/(2.*N))
+            # So DEL0 = (RMAX * PI) / (2*N*TAN(PI*(N-0.5)/(2.*N)))
+
+            # The existing code for rmax, smax in the loop:
+            # rmax_stage = self.grid.r[-1] * spacing_factor_from_coarsest
+            # smax_stage = self.grid.zs_positive[-1] * spacing_factor_from_coarsest
+            # This implies self.grid.r[-1] is max radius of coarsest grid.
+            # This is confusing. Let's use the config's rmax, smax, vmax as fixed physical extents.
+
+            current_rmax = self.config.grid.radial_extent
+            current_smax = self.config.grid.semiconductor_extent
+            current_vmax = self.config.grid.vacuum_extent
+
+            # Calculate DELR0, DELS0 for the current stage such that the extent is matched
+            # Using the inverse of the tangent formula for the last point
+            # For R(nr_stage) = current_rmax:
+            # current_delr0 = (current_rmax * np.pi) / (2 * nr_stage * np.tan(np.pi * (nr_stage - 0.5) / (2 * nr_stage)))
+            # current_dels0 = (current_smax * np.pi) / (2 * ns_stage * np.tan(np.pi * (ns_stage - 0.5) / (2 * ns_stage)))
+            # This is complex. Let's use the simpler Fortran approach: DELR0, DELS0 are scaled.
+            # Assume self.grid.params.delr and .dels are the DELR0, DELS0 for the *finest* grid.
+            # If current stage is K times coarser in points (e.g. nr_finest / nr_stage = K)
+            # Then DELR0_stage = DELR0_finest * K (to maintain same extent with fewer points in tangent formula)
+            # OR DELR0_stage = DELR0_finest / (2**level_diff_from_finest)
+
+            # Let's use the scaling factor method like Fortran:
+            # The delr, dels, delv, delp in self.grid.params are the *actual* cell sizes of the *initial* grid.
+            # The multi-grid stages have N points, and we need to set their DELR0, DELS0, DELV0, DELP0.
+            # The Fortran code scales DELR, DELS by 1/2 at each stage. These are the actual dx, dy.
+            # It seems GridParameters.delr is more like DELR0 for tangent formula.
+
+            # Re-evaluate delr, dels, delv, delp for current stage GridParameters:
+            # These are the 'DELR0', 'DELS0' for the tangent formula for *this specific grid stage*.
+            # The physical extent (rmax, smax, vmax) is assumed constant.
+            # DELR0_stage = (RMAX * PI) / (2*nr_stage*TAN(PI*(nr_stage-0.5)/(2*nr_stage)))
+            # This is how GridParameters should be populated if rmax, smax are fixed.
+            if nr_stage > 1:
+                delr_param = (current_rmax * np.pi) / (2 * nr_stage * np.tan(np.pi * (nr_stage - 0.5) / (2.0 * nr_stage)))
+            else: # nr_stage = 1
+                delr_param = current_rmax # Single point, spacing is extent
+
+            if ns_stage > 1:
+                dels_param = (current_smax * np.pi) / (2 * ns_stage * np.tan(np.pi * (ns_stage - 0.5) / (2.0 * ns_stage)))
+            else: # ns_stage = 1
+                dels_param = current_smax
+
+            if nv_stage > 1:
+                delv_param = current_vmax / (nv_stage -1) # Linear spacing for vacuum extent
+            else: # nv_stage = 1
+                delv_param = current_vmax
+
+            if np_stage > 0:
+                delp_param = (2 * np.pi if not self.config.mirror_symmetry else np.pi) / np_stage
             else:
-                rmax = self.grid.params.rmax * spacing_factor
-                smax = self.grid.params.smax * spacing_factor
-                
-            self.output_file.write(f"LARGEST RADIUS, DEPTH = {rmax:.5f} {smax:.5f}\n")
+                delp_param = np.pi # Should not happen
+
+            self.output_file.write(f"PARAM DELR,DELS,DELV,DELP = {delr_param:.5f} {dels_param:.5f} {delv_param:.5f} {delp_param:.5f}\n")
+            self.output_file.write(f"PARAM RMAX,SMAX,VMAX = {current_rmax:.5f} {current_smax:.5f} {current_vmax:.5f}\n")
+
+            current_stage_grid_params = self.grid.params.__class__( # Use same type as self.grid.params
+                nr=nr_stage, nv=nv_stage, ns=ns_stage, np=np_stage,
+                delr=delr_param, dels=dels_param, delv=delv_param, delp=delp_param,
+                rmax=current_rmax, vmax=current_vmax, smax=current_smax,
+                mirror_symmetry=self.config.mirror_symmetry
+            )
+            current_stage_grid = Grid3D(current_stage_grid_params, self.tip)
             
             # Update Poisson solver parameters for this grid level
-            # Use different convergence tolerances for each stage (from config)
             if hasattr(self.config.computation, 'convergence_parameters'):
                 tolerance = self.config.computation.convergence_parameters[grid_level]
             else:
-                # Default tolerances matching Fortran
-                default_tol = [1e-3, 1e-3, 1e-4]
+                default_tol = [1e-3, 1e-3, 1e-4] # Default tolerances matching Fortran
                 tolerance = default_tol[min(grid_level, len(default_tol)-1)]
             
-            # Update solver parameters for this grid level following Fortran
-            from ..physics.core.poisson import PoissonSolverParameters
-            
-            # Get max iterations for this stage from config
             stage_max_iter = self.config.computation.max_iterations[min(grid_level, len(self.config.computation.max_iterations)-1)]
+            if grid_level == 0: # Coarsest grid
+                stage_max_iter = max(stage_max_iter, 4000)
             
-            # For first stage, use much higher iteration count like Fortran (3500)
-            if grid_level == 0:
-                stage_max_iter = max(stage_max_iter, 4000)  # Ensure at least 4000 iterations for convergence
-            
-            solver_params = PoissonSolverParameters(
+            solver_params_for_stage = PoissonSolverParameters(
                 tolerance=tolerance,
                 max_iterations=stage_max_iter,
-                omega=0.8,
-                adaptive_omega=True,
+                omega=0.8, # TODO: Consider if omega should vary per stage
+                adaptive_omega=True, # TODO: Review adaptive omega strategy for multigrid
                 verbose=True
             )
             
-            # Create new solver with updated parameters
-            self.poisson_solver = type(self.poisson_solver)(self.grid, self.tip, solver_params)
+            # Create new Poisson solver for the current grid stage
+            current_stage_poisson_solver = PoissonSolver(current_stage_grid, self.tip, solver_params_for_stage)
             
-            # Solve Poisson equation
             self.output_file.write(f"SOLUTION # {grid_level + 1}\n")
             self.output_file.flush()
             
-            solution_3d, conv_info = self.poisson_solver.solve(
+            # Pass previous stage solution (solution_3d_coarse) and its grid_params
+            initial_guess_data = (solution_3d_coarse, previous_stage_grid_params)
+
+            solution_3d_fine, conv_info = current_stage_poisson_solver.solve(
                 self._bulk_charge_func,
                 self._surface_charge_func,
-                initial_guess=solution_3d
+                initial_guess_data=initial_guess_data
             )
             
-            # Log convergence
-            bb = self.poisson_solver.get_band_bending()
+            # Update for next iteration
+            solution_3d_coarse = solution_3d_fine
+            previous_stage_grid_params = current_stage_grid_params
+
+            # Log convergence (using the solver for the current stage)
+            bb = current_stage_poisson_solver.get_band_bending()
             self.output_file.write(f"NUMBER OF ITERATIONS = {conv_info['iterations']}\n")
             self.output_file.write(f"BAND BENDING AT MIDPOINT = {bb:.8f}\n")
             self.output_file.flush()
         
-        # Calculate depletion width from solution
-        depl_width = self.poisson_solver.get_depletion_width()
-        
-        # Extract potential profile
-        profile = self.potential_processor.extract_profile(solution_3d)
+        # After the loop, solution_3d_coarse holds the solution from the finest grid
+        solution_3d = solution_3d_coarse
+
+        # The final poisson_solver instance available is the one from the finest grid.
+        # Depletion width and potential profile should be calculated using this finest grid solver/processor.
+        # Ensure potential_processor is updated if its grid changes, or make it stateless.
+        # For now, assume self.potential_processor can work with solution_3d from finest grid.
+        # If PotentialProcessor is grid-dependent, it needs to be updated/recreated for the finest grid.
+        # Let's assume the last `current_stage_poisson_solver` is what we need.
+        final_poisson_solver = current_stage_poisson_solver
+        final_potential_processor = PotentialProcessor(final_poisson_solver.grid) # Use grid from final solver
+
+        depl_width = final_poisson_solver.get_depletion_width()
+        profile = final_potential_processor.extract_profile(solution_3d) # solution_3d is from finest grid
         
         # Calculate tunneling current
         self.output_file.write("\nCOMPUTATION OF CURRENT:\n")
@@ -503,8 +633,10 @@ class MultIntSimulation:
         
         # Handle case where no surface states are defined
         if not en0_values:
-            en0_min = -1.0  # Default minimum
-            en0_max = 2.0   # Default maximum
+            # If en0_values is empty, initialize en0_min to float('inf')
+            # and en0_max to float('-inf')
+            en0_min = float('inf')
+            en0_max = float('-inf')
         else:
             # Find min and max of charge neutrality levels across all areas
             en0_min = min(en0_values)
@@ -521,7 +653,33 @@ class MultIntSimulation:
         etmp = eend - estart
         estart = estart - 2.0 * etmp
         eend = eend + 2.0 * etmp
-        
+
+        # Final adjustment of ESTART and EEND to align grid with EF
+        NE = self.config.charge_table_points
+
+        if NE <= 1:
+            # If NE=1, the table has one point, no step.
+            # The initial estart, eend are fine.
+            # dele is undefined or could be considered eend-estart.
+            # The Fortran code doesn't explicitly handle NE=1 for this adjustment part.
+            # Let's assume NE > 1 based on typical usage.
+            pass # Keep estart and eend as they are
+        else: # NE > 1
+            dele = (eend - estart) / (NE - 1)
+
+            # Ensure dele is not zero to prevent division errors
+            if dele == 0:
+                # If dele is zero (e.g. estart == eend),
+                # this adjustment doesn't make sense.
+                # Keep previous estart, eend. This case should be rare.
+                pass # Keep estart and eend as they are
+            else:
+                netmp = np.round((self.fermi_level - estart) / dele) # NINT equivalent
+                estart_new = self.fermi_level - (netmp - 0.5) * dele
+                eend_new = estart_new + (NE - 1) * dele
+                estart = estart_new
+                eend = eend_new
+
         return (estart, eend)
     
     def _get_grid_sequence(self) -> List[Tuple[int, int, int, int]]:

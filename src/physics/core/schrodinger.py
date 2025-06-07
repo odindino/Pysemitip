@@ -91,16 +91,28 @@ class SchrodingerSolver:
             TunnelCurrent object with current components
         """
         # Extract band parameters
-        band_gap = band_params['band_gap']
+        band_gap_semi = band_params['band_gap']
         m_cb = band_params['cb_effective_mass'] * self.m0
         m_vb_heavy = band_params['vb_effective_mass_heavy'] * self.m0
         m_vb_light = band_params['vb_effective_mass_light'] * self.m0
-        fermi_level = band_params['fermi_level']
-        tip_fermi = band_params['tip_fermi_level']
         
-        # Create band profiles
-        band_profile = self._create_band_profiles(potential_profile, band_gap)
+        # fermi_level_semi_bulk_rel_VB is EF_semi_bulk - Ev_bulk_semi (from EFFIND)
+        fermi_level_semi_bulk_rel_VB = band_params['fermi_level']
+        electron_affinity_semi = band_params['electron_affinity'] # CHI_semi
+
+        # Create band profiles relative to EF_semi_bulk_abs = 0 eV
+        band_profile = self._create_band_profiles(
+            potential_profile,
+            band_gap_semi,
+            electron_affinity_semi,
+            fermi_level_semi_bulk_rel_VB
+        )
         
+        # Fermi level for semiconductor is now 0.0 eV (our reference)
+        fermi_level_semi_ref = 0.0
+        # Tip Fermi level relative to semiconductor bulk Fermi level
+        tip_fermi_ref = -PC.E_CHARGE * bias_voltage # Assuming sample grounded, V_bias = V_tip
+
         # Find localized states
         vb_states = self._find_localized_states(band_profile, 'vb', 
                                                [m_vb_light, m_vb_heavy])
@@ -109,21 +121,21 @@ class SchrodingerSolver:
         # Calculate current from extended states
         vb_current_ext = self._calculate_extended_current(
             band_profile, 'vb', [m_vb_light, m_vb_heavy],
-            fermi_level, tip_fermi, temperature
+            fermi_level_semi_ref, tip_fermi_ref, temperature
         )
         
         cb_current_ext = self._calculate_extended_current(
             band_profile, 'cb', [m_cb],
-            fermi_level, tip_fermi, temperature
+            fermi_level_semi_ref, tip_fermi_ref, temperature
         )
         
         # Calculate current from localized states
         vb_current_loc = self._calculate_localized_current(
-            vb_states, fermi_level, tip_fermi, temperature
+            vb_states, fermi_level_semi_ref, tip_fermi_ref, temperature
         )
         
         cb_current_loc = self._calculate_localized_current(
-            cb_states, fermi_level, tip_fermi, temperature
+            cb_states, fermi_level_semi_ref, tip_fermi_ref, temperature
         )
         
         # Total currents
@@ -141,23 +153,96 @@ class SchrodingerSolver:
         )
     
     def _create_band_profiles(self, potential_profile: PotentialProfile,
-                            band_gap: float) -> BandProfile:
-        """Create band edge profiles from potential."""
-        # Combine z arrays
-        z_combined, pot_combined = potential_profile.get_combined_profile()
+                            band_gap_semi: float,
+                            electron_affinity_semi: float,
+                            fermi_level_semi_bulk_rel_VB: float) -> BandProfile:
+        """
+        Create band edge profiles relative to semiconductor bulk Fermi level (EF_semi_bulk_abs = 0 eV).
+
+        Args:
+            potential_profile: Contains z and phi(z) for vacuum and semiconductor.
+                               phi(z) is electrostatic potential with phi(deep_semiconductor)=0.
+            band_gap_semi: Semiconductor band gap (eV).
+            electron_affinity_semi: Semiconductor electron affinity (CHI_semi) (eV).
+            fermi_level_semi_bulk_rel_VB: EF_semi_bulk - Ev_bulk_semi, from EFFIND (eV).
+        """
+        # Ensure z_semiconductor is increasing for concatenation after flip
+        # Typically, z_semiconductor from PotentialProfile is already like [-depth, ..., -dz, 0]
+        # If it's [0, -dz, ..., -depth], it needs flipping before use if get_combined_profile isn't used.
+        # PotentialProfile.get_combined_profile() handles this.
+        z_combined, phi_combined = potential_profile.get_combined_profile() # phi(z) with phi(deep_semi)=0
+
+        # Semiconductor bulk Fermi level (EF_semi_bulk_abs) is our energy reference (0 eV).
         
-        # Band edges (simplified - assumes electron affinity alignment)
-        # In full implementation, would need proper band alignment
-        vb_profile = pot_combined - band_gap
-        cb_profile = pot_combined
+        # Ev_bulk_offset = Ev_bulk_semi - EF_semi_bulk_abs
+        Ev_bulk_offset = -fermi_level_semi_bulk_rel_VB
+        # Ec_bulk_offset = Ec_bulk_semi - EF_semi_bulk_abs
+        Ec_bulk_offset = Ev_bulk_offset + band_gap_semi
+
+        # Separate semiconductor and vacuum parts of phi_combined based on z_combined
+        # Assuming z_combined is sorted and 0.0 marks the interface
+        # Find index of z=0 (interface)
+        interface_idx = np.argmin(np.abs(z_combined)) # Index where z is closest to 0
+
+        # Handle cases: z_combined might not have an exact 0.
+        # If all z < 0 (only semiconductor part in profile, unlikely for tunneling problem)
+        # If all z >= 0 (only vacuum part in profile, unlikely)
+
+        # A robust way to split based on original PotentialProfile structure:
+        phi_semi = potential_profile.potential_semiconductor # phi(z) for z_semi
+        phi_vac = potential_profile.potential_vacuum       # phi(z) for z_vac
+        z_semi = potential_profile.z_semiconductor         # z < 0, typically increasing from -depth_max to 0 or near 0
+        z_vac = potential_profile.z_vacuum                 # z > 0, typically increasing from near 0 to vac_max
+
+        # Ensure semiconductor z values are negative or zero, and vacuum z are positive or zero
+        # And that phi_semi corresponds to z_semi, phi_vac to z_vac.
+        # PotentialProfile.get_combined_profile() already gives sorted z_combined and corresponding phi_combined.
+        # We need to know which part of phi_combined belongs to semiconductor and which to vacuum.
+
+        # Create masks for semiconductor and vacuum regions based on z_combined
+        is_semiconductor = z_combined < 0
+        is_vacuum = z_combined >= 0
+        # Add a small tolerance for z=0 to be included in vacuum if it's duplicated
+        if z_combined[interface_idx] == 0:
+            is_vacuum[interface_idx] = True
+            if interface_idx > 0 and z_combined[interface_idx-1] == 0: # if z=0 is duplicated due to concat
+                 is_semiconductor[interface_idx] = False
+
+
+        # Band edges in semiconductor (phi_combined is already relative to EF_semi_bulk if PoissonSolver sets bulk potential to 0)
+        # PC.E_CHARGE is positive elementary charge. For electron energy, use -e*phi.
+        # If phi is potential, energy for electron is -phi (if e=1).
+        # If phi is potential in Volts, energy is -e_charge * phi in Joules. Divide by e_charge for eV.
+        # So, energy shift in eV due to potential phi (in Volts) is -phi.
+
+        cb_profile_semi_part = Ec_bulk_offset - phi_combined[is_semiconductor]
+        vb_profile_semi_part = Ev_bulk_offset - phi_combined[is_semiconductor]
+
+        # Potential energy in vacuum (for electrons)
+        # U_vac(z) = (E_vacuum_level_at_interface_no_bending) - phi(z_interface) + CHI_semi - phi(z_vac)
+        # U_vac(z) = (Ec_bulk_offset + electron_affinity_semi) - phi_vac_part
+        cb_profile_vac_part = (Ec_bulk_offset + electron_affinity_semi) - phi_combined[is_vacuum]
+
+        # Valence band in vacuum: For electron tunneling, this is not directly used.
+        # Set it far from the CB to avoid issues, or based on a large vacuum "band gap".
+        vb_profile_vac_part = cb_profile_vac_part - 10.0 # Arbitrary large gap (10 eV)
+
+        # Stitch together the profiles. z_combined is already sorted.
+        cb_profile = np.zeros_like(z_combined)
+        vb_profile = np.zeros_like(z_combined)
+
+        cb_profile[is_semiconductor] = cb_profile_semi_part
+        cb_profile[is_vacuum] = cb_profile_vac_part
+        vb_profile[is_semiconductor] = vb_profile_semi_part
+        vb_profile[is_vacuum] = vb_profile_vac_part
         
-        # Find extrema
-        vb_max = np.max(vb_profile)
-        cb_min = np.min(cb_profile)
+        # Find extrema and bulk values (relative to EF_semi_bulk_abs = 0 eV)
+        vb_max = np.max(vb_profile) # Max VB energy (could be in accumulation layer)
+        cb_min = np.min(cb_profile) # Min CB energy (could be in inversion layer or tip)
         
-        # Bulk values (far from surface)
-        vb_bulk = vb_profile[-1]
-        cb_bulk = cb_profile[-1]
+        # Bulk values are now Ec_bulk_offset and Ev_bulk_offset by definition
+        vb_bulk = Ev_bulk_offset
+        cb_bulk = Ec_bulk_offset
         
         return BandProfile(
             z=z_combined,
@@ -279,57 +364,54 @@ class SchrodingerSolver:
         -ℏ²/2m d²ψ/dz² + V(z)ψ = Eψ
         
         Args:
-            z: Position array
-            potential: Potential profile
-            energy: Energy eigenvalue
-            m_eff: Effective mass
+            z: Position array (nm).
+            potential: Potential profile (eV).
+            energy: Energy eigenvalue (eV).
+            m_eff: Effective mass (kg).
             
         Returns:
-            Wave function array
+            Wave function array (unnormalized).
         """
-        # Convert to dimensionless units for numerical stability
-        z_nm = z
-        dz = z[1] - z[0]
-        
-        # Finite difference matrix
         n = len(z)
-        H = np.zeros((n, n))
-        
-        # Kinetic energy term
-        ke_factor = -self.hbar**2 / (2 * m_eff * (dz * 1e-9)**2 * PC.E)  # Convert to eV
-        
-        for i in range(1, n-1):
-            H[i, i-1] = ke_factor
-            H[i, i] = -2 * ke_factor + potential[i]
-            H[i, i+1] = ke_factor
-        
-        # Boundary conditions
-        H[0, 0] = -2 * ke_factor + potential[0]
-        H[0, 1] = ke_factor
-        H[-1, -2] = ke_factor
-        H[-1, -1] = -2 * ke_factor + potential[-1]
-        
-        # Find wave function using inverse iteration
-        # For bound state, use exponential decay boundary conditions
+        if n < 3:
+            raise ValueError("z array must have at least 3 points for Numerov method.")
+
         psi = np.zeros(n)
-        psi[0] = 1.0  # Arbitrary normalization
-        
-        # Simple integration (more sophisticated methods needed for production)
-        for i in range(1, n):
-            if i == 1:
-                psi[i] = psi[0] * np.exp(-np.sqrt(2 * m_eff * PC.E * 
-                                                 max(0, potential[0] - energy)) * 
-                                        dz * 1e-9 / self.hbar)
-            else:
-                # Numerov method would be better here
-                # Ensure we don't go out of bounds
-                pot_idx = min(i, len(potential) - 1)
-                k_sq = 2 * m_eff * PC.E * (energy - potential[pot_idx]) / self.hbar**2
-                if k_sq > 0:
-                    psi[i] = 2 * psi[i-1] - psi[i-2] + k_sq * (dz * 1e-9)**2 * psi[i-1]
-                else:
-                    kappa = np.sqrt(-k_sq)
-                    psi[i] = psi[i-1] * np.exp(-kappa * dz * 1e-9)
+        dz_nm = z[1] - z[0]  # Grid spacing in nm
+        dz_m = dz_nm * 1e-9   # Grid spacing in meters
+
+        # k²(z) = 2m*/ħ² * (E - V(z))
+        # Ensure (E - V(z)) is converted from eV to Joules
+        k_squared_z_values = (2 * m_eff / (self.hbar**2)) * (energy - potential) * PC.E_CHARGE
+
+        # f(z) = 1 + (Δz²/12)k²(z)
+        f_z_values = 1.0 + ((dz_m**2) / 12.0) * k_squared_z_values
+
+        # Initial conditions for shooting method (bound state decaying from z_min)
+        psi[0] = 0.0
+        psi[1] = 1e-5  # Small non-zero value
+
+        # Numerov recurrence relation:
+        # ψ(i+1) = ( (12 - 10*f(i))ψ(i) - f(i-1)ψ(i-1) ) / f(i+1)
+        for i in range(1, n - 1):
+            # Check for potential division by zero if f_z_values[i+1] is too small
+            # This might indicate a problem with the potential or energy range
+            if abs(f_z_values[i+1]) < 1e-12: # Threshold to avoid division by zero
+                # If f(z) is near zero, it's problematic. Wavefunction might be diverging.
+                # For simplicity, fill rest with NaNs or large numbers to indicate failure.
+                psi[i+1:] = np.nan
+                warnings.warn(f"Numerov f(z) near zero at z={z[i+1]:.3f} nm, energy={energy:.3f} eV. Wavefunction may be unreliable.", RuntimeWarning)
+                break
+
+            numerator = ((12.0 - 10.0 * f_z_values[i]) * psi[i]) - (f_z_values[i-1] * psi[i-1])
+            psi[i+1] = numerator / f_z_values[i+1]
+
+            # Check for NaN/Inf propagation
+            if not np.isfinite(psi[i+1]):
+                warnings.warn(f"Numerov produced NaN/Inf at z={z[i+1]:.3f} nm, energy={energy:.3f} eV. Previous psi: {psi[i]:.3e}, {psi[i-1]:.3e}", RuntimeWarning)
+                # Fill rest with NaNs if propagation occurs
+                psi[i+1:] = np.nan
+                break
         
         return psi
     
