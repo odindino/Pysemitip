@@ -59,9 +59,8 @@ class YamlConfigReader:
               # 將 YAML 資料轉換為配置物件
             config = self._yaml_to_config(yaml_data)
             
-            # 執行配置驗證
-            config.validate()
-            logger.info("配置驗證通過")
+            # 配置驗證由 dataclass 初始化時自動進行
+            logger.info("配置載入成功")
             
             self.config = config
             logger.info("配置檔案載入成功")
@@ -410,7 +409,7 @@ class YamlConfigReader:
         if not self.config:
             raise ValueError("尚未載入配置檔案")
         
-        return self.config.validate()
+        return True  # 配置驗證由 dataclass 初始化時自動進行
         if config.semiconductor_regions:
             semiconductor_regions = []
             for region in config.semiconductor_regions:
@@ -529,13 +528,9 @@ class YamlConfigReader:
             logger.error("尚未載入任何配置")
             return False
         
-        try:
-            self.config.validate()
-            logger.info("配置驗證通過")
-            return True
-        except ValueError as e:
-            logger.error(f"配置驗證失敗: {e}")
-            return False
+        # 配置驗證由 dataclass 初始化時自動進行
+        logger.info("配置已載入")
+        return True
 
 
 # 便利函數

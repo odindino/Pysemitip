@@ -358,12 +358,25 @@ class SemiconductorRegion:
         Returns:
             Electron density (cm^-3)
         """
-        # Use the exact Fortran RHOCB implementation via charge density calculator
-        # This ensures consistency with table calculations
+        # Use the exact Fortran RHOCB implementation
+        # Import locally to avoid circular imports
         from ..core.charge_density import ChargeDensityCalculator
         
-        # Create a temporary calculator for this calculation
-        calc = ChargeDensityCalculator([self], [], fermi_level)
+        # Create a minimal props object for the calculator
+        class MinimalProps:
+            def __init__(self, region):
+                self.semiconductor = type('obj', (object,), {
+                    'regions': [region],
+                    'fermi_level': fermi_level
+                })()
+                self.surface = type('obj', (object,), {'regions': []})()
+        
+        # Create temporary calculator with minimal grid and props
+        class MinimalGrid:
+            N_eta = 1
+            N_nu = 1
+            
+        calc = ChargeDensityCalculator(MinimalGrid(), MinimalProps(self))
         return calc._electron_density_direct(self, fermi_level, potential)
     
     def carrier_density_vb(self, fermi_level: float, potential: float = 0.0) -> float:
@@ -377,12 +390,25 @@ class SemiconductorRegion:
         Returns:
             Hole density (cm^-3)
         """
-        # Use the exact Fortran RHOVB implementation via charge density calculator
-        # This ensures consistency with table calculations
+        # Use the exact Fortran RHOVB implementation
+        # Import locally to avoid circular imports
         from ..core.charge_density import ChargeDensityCalculator
         
-        # Create a temporary calculator for this calculation
-        calc = ChargeDensityCalculator([self], [], fermi_level)
+        # Create a minimal props object for the calculator
+        class MinimalProps:
+            def __init__(self, region):
+                self.semiconductor = type('obj', (object,), {
+                    'regions': [region],
+                    'fermi_level': fermi_level
+                })()
+                self.surface = type('obj', (object,), {'regions': []})()
+        
+        # Create temporary calculator with minimal grid and props
+        class MinimalGrid:
+            N_eta = 1
+            N_nu = 1
+            
+        calc = ChargeDensityCalculator(MinimalGrid(), MinimalProps(self))
         return calc._hole_density_direct(self, fermi_level, potential)
     
     def total_charge_density(self, fermi_level: float, potential: float = 0.0) -> float:

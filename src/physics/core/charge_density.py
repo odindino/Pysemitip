@@ -124,20 +124,19 @@ class ChargeDensityCalculator:
     Implements the functionality of SEMIRHO and SURFRHO subroutines.
     """
     
-    def __init__(self, semiconductor_regions: List[SemiconductorRegion],
-                 surface_regions: List[SurfaceRegion],
-                 fermi_level: float):
+    def __init__(self, grid, props):
         """
         Initialize the charge density calculator.
         
         Args:
-            semiconductor_regions: List of semiconductor regions
-            surface_regions: List of surface regions
-            fermi_level: Bulk Fermi level (eV)
+            grid: HyperbolicGrid instance
+            props: SimulationProperties instance containing semiconductor and surface regions
         """
-        self.semiconductor_regions = {r.region_id: r for r in semiconductor_regions}
-        self.surface_regions = {r.region_id: r for r in surface_regions}
-        self.fermi_level = fermi_level
+        self.grid = grid
+        self.props = props
+        self.semiconductor_regions = {r.region_id: r for r in props.semiconductor.regions}
+        self.surface_regions = {r.region_id: r for r in props.surface.regions}
+        self.fermi_level = props.semiconductor.fermi_level
         
         # Initialize Fermi integral calculator
         self._init_fermi_integrals()
@@ -489,6 +488,107 @@ class ChargeDensityCalculator:
         
         # Get charge from surface states
         return region.surface_charge_density(self.fermi_level, potential)
+    
+    def calculate(self, potential: np.ndarray) -> np.ndarray:
+        """
+        Calculate total charge density given electrostatic potential distribution.
+        
+        This method implements the physical charge density calculation for semiconductor
+        regions, including ionized dopants and free carriers.
+        
+        Args:
+            potential: 2D array of electrostatic potential (V) with shape (N_eta, N_nu)
+                      matching the grid dimensions
+            
+        Returns:
+            2D array of charge density (C/m³) with same shape as potential
+        """
+        # Validate input
+        if potential.shape != (self.grid.N_eta, self.grid.N_nu):
+            raise ValueError(f"Potential shape {potential.shape} doesn't match grid shape "
+                           f"({self.grid.N_eta}, {self.grid.N_nu})")
+        
+        # Initialize charge density array
+        rho = np.zeros_like(potential)
+        
+        # Get material properties from first semiconductor region (assuming single region for now)
+        # TODO: Handle multiple regions based on spatial coordinates
+        if not self.semiconductor_regions:
+            raise ValueError("No semiconductor regions defined")
+        
+        region = list(self.semiconductor_regions.values())[0]
+        
+        # Physical constants
+        q = PC.E  # Elementary charge in C
+        
+        # Temperature and thermal energy
+        T = region.temperature
+        kT = region.kT
+        
+        # Get donor and acceptor properties
+        N_d = region.donor_concentration  # cm^-3
+        N_a = region.acceptor_concentration  # cm^-3
+        E_d = region.donor_binding_energy  # eV
+        E_a = region.acceptor_binding_energy  # eV
+        
+        # Band edges (relative to vacuum level)
+        E_c0 = region.band_gap + region.valence_band_offset  # Conduction band edge
+        E_v0 = region.valence_band_offset  # Valence band edge
+        
+        # Fermi level (relative to valence band maximum)
+        E_F = self.fermi_level
+        
+        # Calculate ionized dopant concentrations
+        # For shallow dopants, we can assume complete ionization at room temperature
+        # More accurate calculation would use Fermi-Dirac statistics:
+        # N_d+ = N_d * (1 - f(E_d, E_F))
+        # N_a- = N_a * f(E_a, E_F)
+        
+        if T > 0:
+            # Donor ionization (assuming donor level below conduction band)
+            # f_d = 1 / (1 + g_d * exp((E_d - E_F)/kT))
+            # where g_d is the degeneracy factor (typically 2 for donors)
+            g_d = 2.0
+            E_d_abs = E_c0 - E_d  # Donor level relative to vacuum
+            
+            # Calculate at each grid point considering local potential
+            E_F_local = E_F - potential  # Local Fermi level including potential
+            f_d = 1.0 / (1.0 + g_d * np.exp((E_d_abs - E_F_local) / kT))
+            N_d_plus = N_d * (1.0 - f_d)
+            
+            # Acceptor ionization
+            g_a = 4.0  # Degeneracy factor for acceptors
+            E_a_abs = E_v0 + E_a  # Acceptor level relative to vacuum
+            f_a = 1.0 / (1.0 + g_a * np.exp((E_a_abs - E_F_local) / kT))
+            N_a_minus = N_a * f_a
+        else:
+            # At T=0, use step functions
+            E_F_local = E_F - potential
+            N_d_plus = np.where(E_F_local > E_c0 - E_d, N_d, 0.0)
+            N_a_minus = np.where(E_F_local < E_v0 + E_a, N_a, 0.0)
+        
+        # Calculate carrier concentrations
+        # The band edges are bent by the potential
+        E_c = E_c0 - q * potential  # Conduction band edge with band bending
+        E_v = E_v0 - q * potential  # Valence band edge with band bending
+        
+        # Use the direct calculation methods that match Fortran
+        for i in range(self.grid.N_eta):
+            for j in range(self.grid.N_nu):
+                # Electron density using Fermi-Dirac integral
+                n = self._electron_density_direct(region, E_F, potential[i, j])
+                
+                # Hole density using Fermi-Dirac integral
+                p = self._hole_density_direct(region, E_F, potential[i, j])
+                
+                # Total charge density: ρ = q * (N_d+ - N_a- - n + p)
+                # Note: electrons contribute negative charge, holes positive
+                rho[i, j] = q * (N_d_plus[i, j] - N_a_minus[i, j] - n + p)
+        
+        # Convert from C/cm³ to C/m³
+        rho *= 1e6
+        
+        return rho
     
     def create_charge_tables(self, energy_range: Tuple[float, float],
                            num_points: int = 20000) -> ChargeDensityTables:
