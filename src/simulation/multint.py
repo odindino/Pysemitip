@@ -9,7 +9,7 @@ from src.physics.core.poisson import PoissonSOREquation
 # 舊的導入將不再使用： from src.physics.core.poisson import PoissonSolver
 
 from src.physics.core.charge_density import ChargeDensityCalculator
-from src.physics.materials.semiconductor import SemiconductorRegion
+from src.physics.materials.semiconductor import SemiconductorRegion, create_semiconductor_from_config
 from src.physics.materials.surface_states import SurfaceRegion
 from dataclasses import dataclass
 from typing import List
@@ -38,8 +38,9 @@ class MultInt:
     執行自洽計算以模擬 STM 與半導體樣品間的交互作用。
     【此版本已更新，以使用雙曲面網格和新的 SOR 解法器】
     """
-    def __init__(self, config):
+    def __init__(self, config, output_dir: str): # 修改：增加 output_dir 參數
         self.config = config
+        self.output_dir = output_dir # 新增：儲存輸出目錄
         
         # Create props object with necessary attributes
         self.props = self._create_simulation_properties(config)
@@ -65,24 +66,10 @@ class MultInt:
         # Convert semiconductor regions from config to physics objects
         semiconductor_regions = []
         for region_config in config.semiconductor.regions:
-            semiconductor_region = SemiconductorRegion(
-                region_id=region_config.id,
-                donor_concentration=region_config.donor_concentration,
-                acceptor_concentration=region_config.acceptor_concentration,
-                band_gap=region_config.band_gap,
-                valence_band_offset=region_config.valence_band_offset,
-                electron_affinity=region_config.affinity,
-                donor_binding_energy=region_config.donor_binding_energy,
-                acceptor_binding_energy=region_config.acceptor_binding_energy,
-                cb_effective_mass=region_config.effective_mass.conduction_band,
-                vb_effective_mass_heavy=region_config.effective_mass.valence_band_heavy,
-                vb_effective_mass_light=region_config.effective_mass.valence_band_light,
-                vb_effective_mass_so=region_config.effective_mass.split_off,
-                spin_orbit_splitting=region_config.spin_orbit_splitting,
-                permittivity=region_config.permittivity,
-                allow_degeneracy=region_config.allow_degeneracy,
-                allow_inversion=region_config.allow_inversion,
-                temperature=config.environment.temperature
+            # Pass environment temperature to the factory function
+            semiconductor_region = create_semiconductor_from_config(
+                region_config, 
+                config.environment.temperature
             )
             semiconductor_regions.append(semiconductor_region)
         

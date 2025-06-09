@@ -6,7 +6,7 @@ including band structure, carrier densities, and Fermi level calculations.
 """
 
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Tuple
 from scipy import optimize
 from scipy import special
@@ -47,12 +47,38 @@ class SemiconductorRegion:
     spin_orbit_splitting: float    # ESO
     
     # Material properties
-    permittivity: float           # Relative permittivity
+    permittivity: float
     
-    # Calculation parameters
-    allow_degeneracy: bool = True  # IDEG
-    allow_inversion: bool = True   # IINV parameter from Fortran
-    
+    # Temperature (K) - Added as it's needed for calculations within the region
+    temperature: float
+
+    # Degeneracy flags from config (optional, provide defaults if not present)
+    allow_degeneracy: bool = field(default=True) # Corresponds to IDEG related logic
+    allow_inversion: bool = field(default=True)  # Corresponds to IINV related logic
+
+    # Cached property for average valence band effective mass
+    _vb_effective_mass_avg_cached: Optional[float] = field(default=None, init=False, repr=False)
+
+    @property
+    def vb_effective_mass_avg(self) -> float:
+        """
+        Calculates the density-of-states effective mass for the valence band.
+        This typically combines heavy and light hole bands.
+        m_dos_vb = (m_hh^(3/2) + m_lh^(3/2))^(2/3)
+        """
+        if self._vb_effective_mass_avg_cached is None:
+            # Note: Fortran's AVB might sometimes include split-off band or be a direct input.
+            # Here, we use the common DOS mass formula for heavy and light holes.
+            # If config provides a direct AVB, that should be preferred.
+            # For now, calculating based on heavy and light hole masses.
+            m_avg = (self.vb_effective_mass_heavy**1.5 + self.vb_effective_mass_light**1.5)**(2.0/3.0)
+            self._vb_effective_mass_avg_cached = m_avg
+        return self._vb_effective_mass_avg_cached
+
+    def get_temperature_eV(self) -> float:
+        """Returns temperature in eV."""
+        return self.temperature * PC.k_B_eV_K
+
     @property
     def suppress_valence_band(self) -> bool:
         """Check if valence band occupation should be suppressed (IINV=1 or 3)."""
@@ -436,12 +462,13 @@ class SemiconductorRegion:
         return PC.E * net_charge
 
 
-def create_semiconductor_from_config(config_region) -> SemiconductorRegion:
+def create_semiconductor_from_config(config_region, environment_temperature: float) -> SemiconductorRegion:
     """
     Create a SemiconductorRegion from configuration data.
     
     Args:
         config_region: Configuration object for a semiconductor region
+        environment_temperature: Temperature from the environment section of the config
         
     Returns:
         SemiconductorRegion object
@@ -461,7 +488,7 @@ def create_semiconductor_from_config(config_region) -> SemiconductorRegion:
         vb_effective_mass_so=config_region.effective_mass.split_off,
         spin_orbit_splitting=config_region.spin_orbit_splitting,
         permittivity=config_region.permittivity,
-        allow_degeneracy=config_region.allow_degeneracy,
-        allow_inversion=config_region.allow_inversion,
-        temperature=300.0  # Will come from environment config
+        temperature=environment_temperature, # Pass temperature
+        allow_degeneracy=getattr(config_region, 'allow_degeneracy', True),
+        allow_inversion=getattr(config_region, 'allow_inversion', True)
     )
