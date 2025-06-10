@@ -79,12 +79,27 @@ class ChargeDensityCalculator:
             self.semiconductor_regions_physics = {region.region_id: region for region in regions_list}
             self.surface_regions_physics = {}
             self.system_fermi_level_E_F_main_eV = fermi_level
+            # Create alias for backward compatibility
+            self.E_F_main = self.system_fermi_level_E_F_main_eV
         else:
             # New calling pattern
             self.config = config_or_regions
             self.semiconductor_regions_physics = semiconductor_regions_physics_or_surface
             self.surface_regions_physics = surface_regions_physics or {}
             self.system_fermi_level_E_F_main_eV = system_fermi_level_E_F_main
+
+        # Create alias for backward compatibility
+        self.E_F_main = self.system_fermi_level_E_F_main_eV
+
+        # Create dictionaries for Ev_abs and Ec_abs from semiconductor_regions_physics
+        self.Ev_abs_for_charge_calc = {}
+        self.Ec_abs_for_charge_calc = {}
+        
+        for region_id, region_physics in self.semiconductor_regions_physics.items():
+            if hasattr(region_physics, 'Ev_abs_for_charge_calc_eV'):
+                self.Ev_abs_for_charge_calc[region_id] = region_physics.Ev_abs_for_charge_calc_eV
+            if hasattr(region_physics, 'Ec_abs_for_charge_calc_eV'):
+                self.Ec_abs_for_charge_calc[region_id] = region_physics.Ec_abs_for_charge_calc_eV
 
         # Ev_abs_for_charge_calc_eV and Ec_abs_for_charge_calc_eV are now attributes
         # of the SemiconductorRegionPhysics objects themselves, calculated in their __post_init__.
@@ -689,6 +704,41 @@ class ChargeDensityCalculator:
         else:
             # Fallback to direct calculation
             return self._calculate_rho_for_table_entry(energy - potential, region_id)
+
+    def get_charge_density_C_m3(self, ef_rel_vb_eV: float, region_id: int = None) -> float:
+        """
+        Get charge density in C/m³ for a given Fermi level relative to valence band.
+        
+        Args:
+            ef_rel_vb_eV: Fermi level relative to valence band maximum (eV)
+            region_id: Region ID (defaults to 1)
+            
+        Returns:
+            Charge density in C/m³
+        """
+        # Default to first available region if none specified
+        if region_id is None:
+            if self.charge_density_tables:
+                region_id = next(iter(self.charge_density_tables.keys()))
+            else:
+                region_id = 1  # Default fallback
+        
+        # Use the charge density table if available
+        if region_id in self.charge_density_tables:
+            table = self.charge_density_tables[region_id]
+            # Interpolate from the table
+            charge_density_C_cm3 = np.interp(
+                ef_rel_vb_eV,
+                table.potential_axis_rel_vb,
+                table.charge_density_axis,
+                left=table.charge_density_axis[0],
+                right=table.charge_density_axis[-1]
+            )
+            # Convert from C/cm³ to C/m³
+            return charge_density_C_cm3 * 1e6
+        else:
+            # Fallback to direct calculation
+            return self._calculate_rho_for_table_entry(ef_rel_vb_eV, region_id) * 1e6
 
 # Example usage (for testing purposes, if run directly)
 if __name__ == '__main__':

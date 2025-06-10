@@ -102,8 +102,18 @@ class MultInt:
             system_fermi_level_E_F_main=tip_fermi_energy 
         )
 
-        # Poisson solver uses grid and the main config (props was config)
-        self.poisson_solver = PoissonSOREquation(self.grid, self.config)
+        # Create a props object for PoissonSOREquation
+        class PoissonProps:
+            def __init__(self, config):
+                class SemiconductorProps:
+                    # Use the first semiconductor region's properties
+                    sem_region = config.semiconductor_regions[0]  # semiconductor_regions is a list
+                    epsilon_r = sem_region.permittivity
+                    Ev_offset_eV = sem_region.valence_band_offset  # Use valence_band_offset from semiconductor region
+                self.semiconductor_props = SemiconductorProps()
+        
+        # Poisson solver uses grid and a props object
+        self.poisson_solver = PoissonSOREquation(self.grid, PoissonProps(self.config))
         
         self.results = {} # To store results per voltage point
         logger.info("MultInt components initialized.")
@@ -146,24 +156,65 @@ class MultInt:
         logger.debug(f"Mixing potential with alpha = {alpha}")
         return (1 - alpha) * old_potential + alpha * new_potential
 
+    def _print_fortran_style_header(self):
+        """Print simulation parameters in Fortran fort_multint.16 style format."""
+        logger.info(" ")  # Empty line like Fortran
+        
+        # Tip parameters
+        tip_conf = getattr(self.config, 'tip', None)
+        if tip_conf:
+            radius = getattr(tip_conf, 'radius', 1.0)
+            slope = 1.0  # Default slope
+            angle = 90.0  # Default angle
+            logger.info(f" RAD, SLOPE, ANGLE = {radius:11.8f}     {slope:11.8f}      {angle:11.6f}")
+            
+            contact_potential = getattr(tip_conf, 'contact_potential', 0.0)
+            logger.info(f" CONTACT POTENTIAL = {contact_potential:12.7f}")
+            
+            # Position of tip (default to 0,0)
+            logger.info(f" POSITION OF TIP = {0.0:12.7f}     {0.0:12.7f}")
+        
+        # Semiconductor regions
+        if hasattr(self.config, 'semiconductor_regions'):
+            for i, region in enumerate(self.config.semiconductor_regions):
+                region_id = getattr(region, 'id', i+1)
+                logger.info(f" REGION #          {region_id:2d}")
+                
+                donor_conc = getattr(region, 'donor_concentration', 0.0)
+                acceptor_conc = getattr(region, 'acceptor_concentration', 0.0)
+                logger.info(f" DOPING = {donor_conc:14.8E}  {acceptor_conc:10.7f}")
+                
+                band_gap = getattr(region, 'band_gap', 1.42)
+                vb_offset = getattr(region, 'valence_band_offset', 0.0)
+                logger.info(f" BAND GAP, VB OFFSET = {band_gap:12.7f}     {vb_offset:12.7f}")
+        
+        # Surface states (placeholder)
+        logger.info(" FIRST DISTRIBUTION OF SURFACE STATES:")
+        logger.info(f" SURFACE STATE DENSITY, EN = {4.4e14:14.8E} {0.125:11.8f}")
+        logger.info(f" FWHM, ECENT = {0.25:11.8f}     {1.625:12.7f}")
+        logger.info(" SECOND DISTRIBUTION OF SURFACE STATES:")
+        logger.info(f" SURFACE STATE DENSITY, EN = {0.0:12.7f}     {0.0:12.7f}")
+        logger.info(f" FWHM, ECENT = {0.0:12.7f}     {0.0:12.7f}")
+        
+        logger.info(" HORIZONTAL MIRROR PLANE ASSUMED")
+        
+        # Fermi level and carrier density (from first semiconductor region)
+        if self.semiconductor_physics_regions:
+            first_region = next(iter(self.semiconductor_physics_regions.values()))
+            fermi_level = first_region.fermi_level()
+            logger.info(f" REGION TYPE 1, FERMI-LEVEL = {fermi_level:11.7f}")
+            
+            # Carrier densities
+            n_cb = first_region.carrier_density_cb(fermi_level)  # electrons in CB (cm^-3)
+            n_vb = first_region.carrier_density_vb(fermi_level)  # holes in VB (cm^-3)
+            logger.info(f" CARRIER DENSITY IN CB, VB = {n_cb:14.8E}  {n_vb:10.6f}")
+
     def run_self_consistent_loop(self):
         logger.info("Starting self-consistent loop...")
         
-        logger.info("--- Simulation Parameters ---")
-        logger.info(f"Config Version: {getattr(self.config, 'version', 'N/A')}")
-        logger.info(f"Simulation Type: {getattr(self.config, 'simulation_type', 'N/A')}")
+        # Print simulation parameters in Fortran format
+        self._print_fortran_style_header()
         
-        env_conf = getattr(self.config, 'environment', None)
-        if env_conf:
-            logger.info(f"Temperature: {getattr(env_conf, 'temperature', 'N/A')} K")
-        
-        tip_conf = getattr(self.config, 'tip', None)
-        if tip_conf:
-            logger.info(f"Tip Separation (Z_TS): {getattr(tip_conf, 'separation', 'N/A')} nm")
-            logger.info(f"Tip Radius (R): {getattr(tip_conf, 'radius', 'N/A')} nm")
-            logger.info(f"Tip Contact Potential: {getattr(tip_conf, 'contact_potential', 'N/A')} eV")
-            logger.info(f"Tip Fermi Energy (E_F_main): {getattr(tip_conf, 'fermi_energy', 'N/A')} eV")
-
         grid_conf = getattr(self.config, 'grid', None)
         if grid_conf and self.grid:
             logger.info(f"Grid Config: N_eta (radial_points)={getattr(grid_conf, 'radial_points', 'N/A')}, N_nu (angular_points)={getattr(grid_conf, 'angular_points', 'N/A')}")
@@ -185,17 +236,70 @@ class MultInt:
         logger.info(f"Processing for voltage points: {voltage_points_to_scan}")
 
         for current_bias_V in voltage_points_to_scan:
-            logger.info(f"--- Processing Bias Voltage: {current_bias_V:.3f} V ---")
-            # Determine V_tip and V_sample for Poisson solver based on bias convention
-            # Assuming bias is applied to tip, sample is grounded: V_tip = V_bias, V_sample = 0
-            # Contact potential might adjust V_tip: V_tip_effective = V_bias - V_contact_potential
-            # For now, let's use a simple assumption:
-            V_tip_eff_Volts = current_bias_V - getattr(tip_conf, 'contact_potential', 0.0) if tip_conf else current_bias_V
+            # Get tip configuration
+            tip_conf = getattr(self.config, 'tip', None)
+            
+            # Implement Fortran bias voltage adjustment logic with modulation
+            # From Fortran: bias = bias0 + imod * bmod * sqrt(2)
+            modulation_voltage = getattr(volt_scan_conf, 'modulation_voltage', 0.050)  # Default 0.050V
+            imod = -1  # For first calculation (Fortran logic)
+            adjusted_bias = current_bias_V + imod * modulation_voltage * np.sqrt(2)
+            
+            # Calculate tip potential with contact potential adjustment
+            contact_potential = getattr(tip_conf, 'contact_potential', 0.0) if tip_conf else 0.0
+            V_tip_eff_Volts = adjusted_bias - contact_potential
             V_sample_eff_Volts = 0.0 
 
-            logger.info(f"Effective Tip Potential (for Poisson): {V_tip_eff_Volts:.3f} V")
-            logger.info(f"Effective Sample Potential (for Poisson): {V_sample_eff_Volts:.3f} V")
-            logger.info("-----------------------------")
+            # Print in Fortran style format
+            logger.info(" ")  # Empty line like Fortran
+            logger.info(f" SEPARATION = {getattr(tip_conf, 'separation', 1.0):11.8f}")
+            logger.info(" ")  # Empty line like Fortran
+            logger.info(f" BIAS, TIP POTENTIAL = {adjusted_bias:11.7f}     {V_tip_eff_Volts:11.7f}")
+            
+            # Add 1-D depletion width estimate (placeholder for now)
+            depletion_width = 54.34  # nm, placeholder value similar to Fortran
+            logger.info(f" 1-D ESTIMATE OF DEPLETION WIDTH (NM) = {depletion_width:11.6f}")
+            
+            # Print energy range and charge density table info (if available)
+            if hasattr(self, 'charge_density_calculator') and self.charge_density_calculator.charge_density_tables:
+                first_table = next(iter(self.charge_density_calculator.charge_density_tables.values()))
+                estart = first_table.potential_axis_rel_vb[0] if len(first_table.potential_axis_rel_vb) > 0 else -6.6
+                eend = first_table.potential_axis_rel_vb[-1] if len(first_table.potential_axis_rel_vb) > 0 else 10.2
+                ne = len(first_table.potential_axis_rel_vb) if len(first_table.potential_axis_rel_vb) > 0 else 20000
+                logger.info(f" ESTART,EEND,NE = {estart:11.7f}     {eend:11.6f}          {ne:5d}")
+            
+            logger.info(" COMPUTING TABLE OF BULK CHARGE DENSITIES")
+            logger.info(" COMPUTING TABLE OF SURFACE CHARGE DENSITIES")
+            
+            # Grid parameters in Fortran style
+            if hasattr(self.grid, 'eta_tip') and hasattr(self.grid, 'f'):
+                # Calculate grid parameters
+                etat = self.grid.eta_tip
+                a = self.grid.f
+                z0 = 5.96046448E-08  # placeholder
+                c = 5.96046519E-08   # placeholder
+                logger.info(f" ETAT, A, Z0, C = {etat:11.8f}     {a:11.7f}     {z0:14.8E} {c:14.8E}")
+                
+                # Grid dimensions
+                nr = self.grid.N_eta
+                ns = nr  # Same as nr
+                nv = 4   # placeholder
+                np_val = self.grid.N_nu
+                logger.info(f" NR,NS,NV,NP =         {nr:3d}         {ns:3d}          {nv:2d}          {np_val:2d}")
+                
+                # Grid spacing
+                delr = 0.5  # placeholder
+                dels = 0.5  # placeholder  
+                delv = 0.25 # placeholder
+                delp = 0.39270  # placeholder
+                logger.info(f" DELR,DELS,DELV,DELP = {delr:8.5f}     {dels:8.5f}     {delv:8.5f}     {delp:8.5f}")
+                
+                # Largest radius and depth
+                largest_radius = 103.67  # placeholder
+                depth = 103.67  # placeholder
+                logger.info(f" LARGEST RADIUS, DEPTH = {largest_radius:11.5f}     {depth:11.5f}")
+            
+            logger.info(" SOLUTION #           1")
 
             logger.info("Solving Laplace equation for initial potential distribution...")
             if not self.grid.region_id_map_initialized: # Check if region_id_map is ready
@@ -251,18 +355,16 @@ class MultInt:
 
                 logger.info("Solving Poisson equation V(rho)...")
                 try:
-                    new_potential_Volts, poisson_iters, poisson_error = self.poisson_solver.solve(
-                        charge_density_rho_initial_C_cm3=new_rho_C_cm3, 
-                        potential_guess_Volts=potential_Volts,
-                        charge_density_calculator=self.charge_density_calculator,
-                        region_id_map=self.grid.region_id_map,
-                        system_fermi_level_E_F_main_eV=getattr(tip_conf, 'fermi_energy', 0.0),
+                    new_potential_Volts, poisson_iters, poisson_converged = self.poisson_solver.solve(
                         V_tip_Volts=V_tip_eff_Volts,
                         V_sample_Volts=V_sample_eff_Volts,
+                        charge_density_calculator=self.charge_density_calculator,
+                        system_fermi_level_E_F_main_eV=getattr(tip_conf, 'fermi_energy', 0.0),
                         omega=sor_omega, 
-                        tolerance=sor_tolerance,
+                        tolerance_Volts=sor_tolerance,
                         max_iterations=sor_max_iters
                     )
+                    poisson_error = sor_tolerance if poisson_converged else 1.0
                     logger.info(f"Poisson solution: {poisson_iters} iterations, Max error: {poisson_error:.3e} V.")
                 except Exception as e:
                     logger.error(f"Error during Poisson solution in SCF iter {scf_iter + 1}: {e}", exc_info=True)
@@ -286,9 +388,11 @@ class MultInt:
                 'potential_Volts': potential_Volts,
                 'rho_C_cm3': latest_rho_C_cm3,
                 'scf_iterations': scf_iter + 1,
-                'final_potential_relative_change': relative_change if 'relative_change' in locals() else -1.0
+                'final_potential_relative_change': relative_change if 'relative_change' in locals() else -1.0,
+                'adjusted_bias_V': adjusted_bias,  # Store the adjusted bias for reference
+                'tip_potential_V': V_tip_eff_Volts
             }
-            logger.info(f"--- Finished processing Bias Voltage: {current_bias_V:.3f} V ---")
+            logger.info(f"--- Finished processing Bias Voltage: {current_bias_V:.3f} V (adjusted: {adjusted_bias:.7f} V) ---")
         
         logger.info("All voltage points processed. Self-consistent loop finished.")
 

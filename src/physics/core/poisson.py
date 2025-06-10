@@ -213,6 +213,49 @@ class PoissonSOREquation:
                 
         logger.info("SOR coefficients precomputed successfully.")
 
+    def _calculate_pot0_fortran_style(self, potential):
+        """
+        Calculate Pot0 using Fortran PCENT method.
+        
+        This calculates the band bending at the midpoint using the same
+        weighted average method as Fortran SEMITIP.
+        
+        Args:
+            potential: 2D potential array [N_eta, N_nu]
+            
+        Returns:
+            Pot0 value (similar to Fortran PCENT function)
+        """
+        try:
+            N_eta, N_nu = potential.shape
+        except (AttributeError, ValueError):
+            # Fallback for unusual shapes
+            return potential.flat[0] if potential.size > 0 else 0.0
+        
+        if N_eta < 2 or N_nu < 1:
+            return potential.flat[0] if potential.size > 0 else 0.0
+        
+        # Fortran PCENT calculation with JJ=0 (interface)
+        # I=1 in Fortran (0-indexed as I=0 in Python)
+        # Formula: SUM = Σ(k=1 to NP) [(9*VSINT(1,I,k) - VSINT(1,I+1,k))/8]
+        #          PCENT = SUM/NP
+        
+        I = 0  # Corresponds to I=1 in Fortran (0-indexed)
+        if I + 1 >= N_eta:
+            # Not enough points for interpolation
+            return np.mean(potential[I, :]) if I < N_eta else potential.flat[0]
+        
+        sum_val = 0.0
+        for k in range(N_nu):  # k corresponds to angle index
+            # Weighted interpolation: (9*V(I,k) - V(I+1,k))/8
+            weighted_value = (9.0 * potential[I, k] - potential[I + 1, k]) / 8.0
+            sum_val += weighted_value
+        
+        # Average over all angular points
+        pot0 = sum_val / N_nu if N_nu > 0 else 0.0
+        
+        return pot0
+
     def _apply_boundary_conditions(self, potential, V_tip, V_sample):
         """應用邊界條件"""
         try:
@@ -394,6 +437,13 @@ class PoissonSOREquation:
 
             # 檢查收斂
             diff_norm = np.linalg.norm(potential - potential_old)
+            
+            # Print iteration info in Fortran style every 100 iterations
+            if iterations % 100 == 0:
+                # Calculate Pot0 using Fortran PCENT method
+                pot0 = self._calculate_pot0_fortran_style(potential)
+                logger.info(f" ITER,Pot0 =        {iterations:4d} {pot0:14.8E}")
+            
             if diff_norm < tolerance_Volts:
                 converged = True
                 logger.info(f"SOR converged in {iterations} iterations. Fallback count: {fallback_count}.")
@@ -404,3 +454,70 @@ class PoissonSOREquation:
 
         self.potential = potential
         return self.potential, iterations, converged
+
+    def solve_laplace(self, V_tip_Volts, V_sample_Volts, region_id_map=None, **kwargs):
+        """
+        求解拉普拉斯方程 (無電荷密度項)
+        
+        Args:
+            V_tip_Volts: 針尖電位
+            V_sample_Volts: 樣品電位
+            region_id_map: 區域 ID 映射 (可選)
+            **kwargs: 額外參數
+            
+        Returns:
+            tuple: (電位矩陣, 迭代次數, 最大誤差)
+        """
+        logger.info("Solving Laplace equation (no charge density)")
+        
+        try:
+            N_eta, N_nu = self.grid.N_eta, self.grid.N_nu
+        except AttributeError:
+            N_eta, N_nu = self.potential.shape
+            
+        potential = np.copy(self.potential)
+        
+        # 應用初始邊界條件
+        potential = self._apply_boundary_conditions(potential, V_tip_Volts, V_sample_Volts)
+        
+        max_iterations = kwargs.get('max_iterations', 1000)
+        tolerance = kwargs.get('tolerance', 1e-6)
+        omega = kwargs.get('omega', 1.5)
+        
+        converged = False
+        iterations = 0
+        max_error = float('inf')
+        
+        for iteration in range(max_iterations):
+            iterations = iteration + 1
+            potential_old = np.copy(potential)
+            
+            # 遍歷內部網格點 (拉普拉斯方程，無電荷密度)
+            for i in range(1, N_eta - 1):
+                for j in range(1, N_nu - 1):
+                    # 標準 SOR 更新 (無電荷密度項)
+                    self._apply_sor_update(potential, potential_old, i, j, omega)
+            
+            # 應用邊界條件
+            potential = self._apply_boundary_conditions(potential, V_tip_Volts, V_sample_Volts)
+            
+            # 檢查收斂
+            diff = np.abs(potential - potential_old)
+            max_error = np.max(diff)
+            
+            # Print iteration info in Fortran style every 100 iterations
+            if iterations % 100 == 0:
+                # Calculate Pot0 using Fortran PCENT method
+                pot0 = self._calculate_pot0_fortran_style(potential)
+                logger.info(f" ITER,Pot0 =        {iterations:4d} {pot0:14.8E}")
+            
+            if max_error < tolerance:
+                converged = True
+                logger.info(f"Laplace equation converged in {iterations} iterations. Max error: {max_error:.3e} V")
+                break
+        
+        if not converged:
+            logger.warning(f"Laplace equation did not converge after {max_iterations} iterations. Max error: {max_error:.3e} V")
+        
+        self.potential = potential
+        return self.potential, iterations, max_error

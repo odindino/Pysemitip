@@ -420,7 +420,7 @@ class SemiconductorRegion:
             N_nu = 1
             computation = None  # Skip charge density table building
             
-        calc = ChargeDensityCalculator(MinimalGrid(), MinimalProps(self))
+        calc = ChargeDensityCalculator([self], [], fermi_level=fermi_level)
         return calc._electron_density_direct(self, fermi_level, potential)
     
     def carrier_density_vb(self, fermi_level: float, potential: float = 0.0) -> float:
@@ -453,7 +453,7 @@ class SemiconductorRegion:
             N_nu = 1
             computation = None  # Skip charge density table building
             
-        calc = ChargeDensityCalculator(MinimalGrid(), MinimalProps(self))
+        calc = ChargeDensityCalculator([self], [], fermi_level=fermi_level)
         return calc._hole_density_direct(self, fermi_level, potential)
     
     def total_charge_density(self, fermi_level: float, potential: float = 0.0) -> float:
