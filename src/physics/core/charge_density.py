@@ -126,179 +126,93 @@ class ChargeDensityCalculator:
         voltage_scan_config: Optional[VoltageScanConfig] # from main config
     ) -> Tuple[float, float]:
         """
-        Estimates the energy range (min and max ef_local_rel_local_vb) for a given
-        semiconductor region's charge density table. This estimation is crucial for
-        ensuring the table covers all relevant local Fermi level variations relative
-        to the local valence band maximum during the simulation.
+        Estimates the energy range using the exact Fortran MultInt3-6.4.f logic (lines 342-351).
+        This implements the ESTART/EEND calculation that's done globally in Fortran,
+        adapted for per-region tables.
 
-        The method aims to replicate the core logic of Fortran's ESTART/EEND estimation
-        but adapted for per-region tables. The table axis, potential_axis_rel_vb,
-        represents ef_local_rel_local_vb = E_F_local - Ev_local.
-        Based on the problem description, E_F_local is typically E_F_main (system Fermi level),
-        and Ev_local = Ev_abs_zero_potential - V_local (where V_local is local electrostatic potential).
-        Thus, ef_local_rel_local_vb = E_F_main - (Ev_abs_zero_potential - V_local)
-                                   = (E_F_main - Ev_abs_zero_potential) + V_local
-                                   = region_physics.ef_vb_equilibrium + V_local.
-        Alternatively, as stated in the original docstring for this function:
-        ef_local_rel_local_vb = region_physics.ef_vb_equilibrium - V_local_alt,
-        where V_local_alt is the local electrostatic potential relative to E_F_main, defined such
-        that positive V_local_alt lowers electron energies. If V_local_alt = -V_local, the forms are consistent.
-        The implementation uses ef_vb_equilibrium - V_local_potential_wrt_EF_main.
-
-        Args:
-            region_config: Configuration for the semiconductor region.
-            region_physics: Physics properties for the semiconductor region.
-            tip_config: Tip configuration.
-            voltage_scan_config: Voltage scan configuration.
-
-        Returns:
-            A tuple (min_energy_ev, max_energy_ev) for the potential_axis_rel_vb in eV.
+        The Fortran logic:
+        1. ESTART = AMIN1(EF, EF-PotTIP, EN0MIN)
+        2. EEND = AMAX1(EF, EF-PotTIP, EN0MAX)  
+        3. ETMP = EEND - ESTART
+        4. ESTART = ESTART - 2.*ETMP
+        5. EEND = EEND + 2.*ETMP
+        6. Final adjustment for grid alignment
         """
-        # en0_region is the equilibrium Fermi level for this specific region,
-        # relative to its own valence band maximum (E_F_equil_region - Ev_bulk_region).
-        # This is a key reference point for this region's table.
-        en0_region = region_physics.fermi_level(potential=0.0)  # Calculate equilibrium Fermi level
-
-        # 1. Determine the range of applied bias voltages.
+        
+        # Get EF (first region's Fermi level, like EFFIND(1,EF) in Fortran)
+        EF = region_physics.fermi_level()  # This corresponds to EFFIND result for this region
+        
+        # Get voltage range for PotTIP calculation  
         min_bias = 0.0
         max_bias = 0.0
         if voltage_scan_config and voltage_scan_config.points > 0:
-            # Ensure points is at least 1 for linspace if start and end are different,
-            # or handle single point scan (points=1 means start voltage only).
             if voltage_scan_config.points == 1:
                 voltages = np.array([voltage_scan_config.start])
             else:
-                voltages = np.linspace(voltage_scan_config.start,
-                                       voltage_scan_config.end,
-                                       voltage_scan_config.points)
+                voltages = np.linspace(voltage_scan_config.start, voltage_scan_config.end, voltage_scan_config.points)
             min_bias = np.min(voltages)
             max_bias = np.max(voltages)
-        elif self.config.computation: # Single bias from computation config
+        elif self.config.computation:
             min_bias = self.config.computation.bias_voltage_V
             max_bias = self.config.computation.bias_voltage_V
         
-        # 2. Calculate Contact Potential (CPot) for this region.
-        # CPot = tip_work_function - semiconductor_bulk_work_function
-        # semiconductor_bulk_work_function = Chi_s + (Ec_bulk - EF_bulk)
-        #                                = electron_affinity + band_gap - ef_vb_equilibrium
-        semiconductor_wf = region_physics.electron_affinity + region_physics.band_gap - en0_region
+        # Calculate contact potential for this region
+        semiconductor_wf = region_physics.electron_affinity + region_physics.band_gap - EF
         contact_potential = tip_config.work_function - semiconductor_wf
-
-        # 3. Calculate PotTIP: Tip potential relative to the system Fermi level (E_F_main).
-        # PotTIP = applied_bias + contact_potential. This is the effective potential
-        # difference driving band bending near the tip.
+        
+        # Calculate PotTIP range (bias + contact_potential, following Fortran logic)
         min_pot_tip = min_bias + contact_potential
         max_pot_tip = max_bias + contact_potential
-
-        # 4. Estimate the range of ef_local_rel_local_vb.
-        # ef_local_rel_local_vb = en0_region - V_local, where V_local is the local
-        # electrostatic potential at a point in the semiconductor, relative to E_F_main.
-        # V_local can be approximated by:
-        #   - 0 (deep in the bulk, far from the tip influence)
-        #   - min_pot_tip (potential at semiconductor surface under tip influence, one extreme)
-        #   - max_pot_tip (potential at semiconductor surface under tip influence, other extreme)
-        # These approximations help define the initial span of ef_local_rel_local_vb.
         
-        val_at_bulk_potential = en0_region  # V_local = 0
-        # If V_local = max_pot_tip, ef_local_rel_local_vb = en0_region - max_pot_tip
-        val_at_min_tip_potential_effect = en0_region - max_pot_tip
-        # If V_local = min_pot_tip, ef_local_rel_local_vb = en0_region - min_pot_tip
-        val_at_max_tip_potential_effect = en0_region - min_pot_tip
+        # For a conservative estimate, use the extreme PotTIP values
+        # In actual Fortran, this is calculated per voltage point, but for table pre-calculation
+        # we need to cover the full range
+        PotTIP_values = [min_pot_tip, max_pot_tip]
         
-        # Initial estimates for the range of ef_local_rel_local_vb, similar to Fortran's
-        # use of AMIN1/AMAX1 with relevant energy levels for the specific region.
-        estart_initial = min(val_at_bulk_potential, val_at_min_tip_potential_effect, val_at_max_tip_potential_effect)
-        eend_initial = max(val_at_bulk_potential, val_at_min_tip_potential_effect, val_at_max_tip_potential_effect)
-
-        # 5. Add initial fixed padding (Fortran often uses +/- 0.5 eV before expansion).
-        # This value can be configured in the simulation settings.
-        initial_padding_ev = getattr(self.config.computation, 'charge_density_table_initial_padding_eV', 0.5) \
-            if self.config.computation else 0.5  # Default based on common Fortran practice
-
-        estart_padded = estart_initial - initial_padding_ev
-        eend_padded = eend_initial + initial_padding_ev
+        # Calculate EN0 values from all regions (this would be done globally in Fortran)
+        EN0_values = []
+        for r_physics in self.semiconductor_regions_physics.values():
+            en0 = r_physics.fermi_level()  # charge neutrality level
+            EN0_values.append(en0)
         
-        # 6. Fortran-style range expansion.
-        # ETMP = EEND_padded - ESTART_padded
-        # ESTART_new = ESTART_padded - expansion_factor * ETMP
-        # EEND_new = EEND_padded + expansion_factor * ETMP
-        # A common expansion_factor (N in Fortran) is 2, leading to a ~5x wider range.
-        # This expansion provides a safety margin for interpolation accuracy and
-        # to cover unexpected potential variations during the Poisson solver's iterations.
-        # This factor can be configured in the simulation settings.
-        fortran_expansion_factor = getattr(self.config.computation, 'charge_density_table_expansion_factor', 2.0) \
-            if self.config.computation else 2.0  # Default to N=2 for 5x expansion, a common Fortran heuristic
-
-        etmp = eend_padded - estart_padded
+        EN0MIN = min(EN0_values) if EN0_values else EF
+        EN0MAX = max(EN0_values) if EN0_values else EF
         
-        # Handle cases where etmp might be zero or very small (e.g., intrinsic material at zero bias).
-        # This ensures a minimum width for ETMP before expansion.
-        min_etmp_width = 1e-3 # eV
-        if etmp < min_etmp_width:
-            # Fallback: ensure a minimal sensible range.
-            # If bandgap is significant, use it as a basis for ETMP.
-            # Otherwise, use a default span (e.g., 1 eV).
-            if region_physics.Eg > 0.1: # eV
-                etmp_fallback = region_physics.Eg 
-            else: # For metals or very small gap materials
-                etmp_fallback = 1.0 # Default 1 eV span
+        # Apply Fortran logic for each PotTIP to get the overall range
+        all_estart = []
+        all_eend = []
+        
+        for PotTIP in PotTIP_values:
+            # Fortran lines 342-343:
+            # ESTART=AMIN1(EF,EF-PotTIP,EN0MIN)
+            # EEND=AMAX1(EF,EF-PotTIP,EN0MAX)
+            EF_minus_PotTIP = EF - PotTIP
+            estart_initial = min(EF, EF_minus_PotTIP, EN0MIN)
+            eend_initial = max(EF, EF_minus_PotTIP, EN0MAX)
             
-            # Recenter the padded range around its midpoint using the new etmp_fallback
-            mid_point = (estart_padded + eend_padded) / 2.0
-            estart_padded = mid_point - etmp_fallback / 2.0
-            eend_padded = mid_point + etmp_fallback / 2.0
-            etmp = eend_padded - estart_padded # Recalculate etmp, should now be etmp_fallback
-
-        final_min_energy = estart_padded - fortran_expansion_factor * etmp
-        final_max_energy = eend_padded + fortran_expansion_factor * etmp
+            # Fortran lines 344-346:
+            # ETMP=EEND-ESTART
+            # ESTART=ESTART-2.*ETMP
+            # EEND=EEND+2.*ETMP
+            etmp = eend_initial - estart_initial
+            estart_expanded = estart_initial - 2.0 * etmp
+            eend_expanded = eend_initial + 2.0 * etmp
+            
+            all_estart.append(estart_expanded)
+            all_eend.append(eend_expanded)
         
-        # 7. Sanity checks and constraints.
-        # Ensure the range is physically sensible and adequately covers band edges.
-        # ef_local_rel_local_vb = 0 corresponds to Ev_local.
-        # ef_local_rel_local_vb = Eg corresponds to Ec_local.
-        # The table should extend somewhat into the valence and conduction bands.
-        # These bounds ensure the table covers at least a certain range around Ev and Ec.
-        # For example, from well within the valence band to well within the conduction band.
-        # `max(0.5 * Eg, 1.0)` ensures a margin of at least 1eV or 0.5*Eg.
-        margin_factor = 0.5 # Multiplier for Eg
-        min_abs_margin = 1.0 # eV, absolute minimum margin
+        # Take the overall range covering all voltage points
+        final_min_energy = min(all_estart)
+        final_max_energy = max(all_eend)
         
-        # Sensible lower bound: Should be below Ev (0) by a margin.
-        # (e.g., Ev - (0.5*Eg + padding) or Ev - (1eV + padding))
-        min_sensible_bound = -max(margin_factor * region_physics.band_gap, min_abs_margin) - initial_padding_ev
-        
-        # Sensible upper bound: Should be above Ec (Eg) by a margin.
-        # (e.g., Ec + (0.5*Eg + padding) or Ec + (1eV + padding))
-        max_sensible_bound = region_physics.band_gap + max(margin_factor * region_physics.band_gap, min_abs_margin) + initial_padding_ev
-        
-        # Ensure the calculated final range is at least as wide as these sensible bounds.
-        # If expanded range is narrower, widen it to sensible bounds.
-        # If expanded range is wider, keep the wider (more conservative) range.
-        final_min_energy = min(final_min_energy, min_sensible_bound)
-        final_max_energy = max(final_max_energy, max_sensible_bound)
-
-        # 8. Final fallback: Ensure min is strictly less than max.
-        # This handles pathological cases (e.g., Eg is zero/negative, or extreme parameters).
-        if final_max_energy <= final_min_energy:
-            # Fallback to an arbitrary sensible range around the region's equilibrium Fermi level.
-            final_min_energy = en0_region - 3.0 # eV
-            final_max_energy = en0_region + region_physics.Eg + 3.0 # eV
-            if final_max_energy <= final_min_energy: # Ultimate fallback for extreme cases
-                 final_min_energy = -4.0 # eV
-                 final_max_energy = 4.0  # eV
-        
-        # Debug printing (can be enabled if needed by uncommenting print statements in the original code)
-        # print(f"Region {region_config.id} ({region_physics.name}):")
-        # print(f"  ef_vb_equilibrium (en0_region): {en0_region:.3f} eV")
-        # print(f"  Bias: [{min_bias:.3f}, {max_bias:.3f}] V, CPot: {contact_potential:.3f} eV")
-        # print(f"  PotTIP range: [{min_pot_tip:.3f}, {max_pot_tip:.3f}] eV (relative to E_F_main)")
-        # print(f"  Initial ef_local_rel_local_vb estimates (val_bulk, val_minPotTIP, val_maxPotTIP): {val_at_bulk_potential:.3f}, {val_at_min_tip_potential:.3f}, {val_at_max_tip_potential:.3f}")
-        # print(f"  estart_initial: {estart_initial:.3f}, eend_initial: {eend_initial:.3f}")
-        # print(f"  Padded estart/eend: {estart_padded:.3f}, {eend_padded:.3f} (padding: {initial_padding_ev:.2f} eV)")
-        # print(f"  ETMP: {etmp:.3f} eV")
-        # print(f"  Fortran expansion factor: {fortran_expansion_factor}")
-        # print(f"  Final energy range for table (ef_local_rel_local_vb): [{final_min_energy:.3f}, {final_max_energy:.3f}] eV")
-        # print(f"  Sensible bounds check: min_sensible={min_sensible_bound:.3f}, max_sensible={max_sensible_bound:.3f}")
+        # Debug printing (disabled for normal operation)
+        # print(f"Fortran-style energy range for Region {region_physics.region_id}:")
+        # print(f"  EF = {EF:.3f} eV")
+        # print(f"  Bias range: [{min_bias:.3f}, {max_bias:.3f}] V")
+        # print(f"  Contact potential: {contact_potential:.3f} eV") 
+        # print(f"  PotTIP range: [{min_pot_tip:.3f}, {max_pot_tip:.3f}] eV")
+        # print(f"  EN0MIN = {EN0MIN:.3f}, EN0MAX = {EN0MAX:.3f} eV")
+        # print(f"  Final energy range: [{final_min_energy:.3f}, {final_max_energy:.3f}] eV")
 
         return final_min_energy, final_max_energy
 

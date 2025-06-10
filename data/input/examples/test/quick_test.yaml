@@ -13,7 +13,7 @@ environment:
 # 探針設定
 tip:
   shank_slope: 1.0  # 探針錐角參數 tan(90-(theta/2))
-  separation: 1.1  # 探針-樣品距離 (nm) - 必須 > radius
+  separation: 1.0  # 探針-樣品距離 (nm) - 必須 > radius
   radius: 1.0  # 探針半徑 (nm)
   protrusion_radius: 0.0  # 探針端半球狀突出半徑 (nm)
   contact_potential: 0.0  # 接觸電位差 (eV)

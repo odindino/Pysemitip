@@ -129,14 +129,15 @@ class MultInt:
         logger.info(f"Grid Params: N_eta (radial_points)={grid_params.radial_points}, N_nu (angular_points)={grid_params.angular_points}")
         logger.info(f"Tip Params: Radius={tip_params.radius} nm, Separation={tip_params.separation} nm")
         try:
-            # Assuming HyperbolicGrid takes N_eta, N_nu, R, Z_TS
+            # Assuming HyperbolicGrid takes N_eta, N_nu, R, Z_TS, shank_slope
             # Mapping config names: radial_points -> N_eta, angular_points -> N_nu
-            # R -> tip_params.radius, Z_TS -> tip_params.separation
+            # R -> tip_params.radius, Z_TS -> tip_params.separation, shank_slope -> tip_params.shank_slope
             grid = HyperbolicGrid(
                 N_eta=grid_params.radial_points, 
                 N_nu=grid_params.angular_points,
                 R=tip_params.radius,
-                Z_TS=tip_params.separation
+                Z_TS=tip_params.separation,
+                shank_slope=tip_params.shank_slope
                 # r_max_factor can be added if it's in config.grid
             )
             logger.info(f"HyperbolicGrid created: Actual N_eta={grid.N_eta}, N_nu={grid.N_nu}, f={grid.f:.4f} nm, eta_tip={grid.eta_tip:.4f}")
@@ -149,12 +150,19 @@ class MultInt:
             raise
             
     def mix_potential(self, old_potential, new_potential):
-        # mixing_alpha might be part of config.computation
-        alpha = getattr(getattr(getattr(self.config, 'computation', None), 'mixing_alpha', None), 'value', 0.3)
+        # Use more conservative mixing for better convergence
+        alpha = getattr(getattr(getattr(self.config, 'computation', None), 'mixing_alpha', None), 'value', 0.1)
         # If computation.mixing_alpha is a direct float:
-        # alpha = self.config.computation.mixing_alpha if hasattr(self.config.computation, 'mixing_alpha') else 0.3
+        # alpha = self.config.computation.mixing_alpha if hasattr(self.config.computation, 'mixing_alpha') else 0.1
         logger.debug(f"Mixing potential with alpha = {alpha}")
-        return (1 - alpha) * old_potential + alpha * new_potential
+        
+        # Clamp potential to reasonable bounds to prevent numerical instability
+        V_tip = getattr(getattr(self.config, 'tip', None), 'fermi_energy', 0.0)
+        V_bounds = 10.0  # 10V bounds around tip potential
+        mixed_potential = (1 - alpha) * old_potential + alpha * new_potential
+        mixed_potential = np.clip(mixed_potential, V_tip - V_bounds, V_tip + V_bounds)
+        
+        return mixed_potential
 
     def _print_fortran_style_header(self):
         """Print simulation parameters in Fortran fort_multint.16 style format."""
@@ -260,13 +268,73 @@ class MultInt:
             depletion_width = 54.34  # nm, placeholder value similar to Fortran
             logger.info(f" 1-D ESTIMATE OF DEPLETION WIDTH (NM) = {depletion_width:11.6f}")
             
-            # Print energy range and charge density table info (if available)
+            # Calculate ESTART and EEND using Fortran logic
             if hasattr(self, 'charge_density_calculator') and self.charge_density_calculator.charge_density_tables:
-                first_table = next(iter(self.charge_density_calculator.charge_density_tables.values()))
-                estart = first_table.potential_axis_rel_vb[0] if len(first_table.potential_axis_rel_vb) > 0 else -6.6
-                eend = first_table.potential_axis_rel_vb[-1] if len(first_table.potential_axis_rel_vb) > 0 else 10.2
-                ne = len(first_table.potential_axis_rel_vb) if len(first_table.potential_axis_rel_vb) > 0 else 20000
-                logger.info(f" ESTART,EEND,NE = {estart:11.7f}     {eend:11.6f}          {ne:5d}")
+                # Use Fortran MultInt3-6.4.f logic (lines 342-351)
+                # EF = Fermi level of first region (from EFFIND)
+                # PotTIP = adjusted_bias (includes contact potential)
+                # EN0MIN, EN0MAX = min and max of charge neutrality levels across all regions
+                
+                first_region = next(iter(self.semiconductor_physics_regions.values()))
+                EF = first_region.fermi_level()  # This corresponds to EFFIND(1,EF)
+                PotTIP = adjusted_bias  # This is bias + contact potential
+                
+                # Calculate EN0MIN and EN0MAX from all semiconductor regions
+                EN0_values = []
+                for region_physics in self.semiconductor_physics_regions.values():
+                    en0 = region_physics.fermi_level()  # charge neutrality level for each region
+                    EN0_values.append(en0)
+                
+                EN0MIN = min(EN0_values) if EN0_values else EF
+                EN0MAX = max(EN0_values) if EN0_values else EF
+                
+                # Fortran logic: lines 342-351
+                # ESTART=AMIN1(EF,EF-PotTIP,EN0MIN)
+                # EEND=AMAX1(EF,EF-PotTIP,EN0MAX)
+                EF_minus_PotTIP = EF - PotTIP
+                estart_initial = min(EF, EF_minus_PotTIP, EN0MIN)
+                eend_initial = max(EF, EF_minus_PotTIP, EN0MAX)
+                
+                # ETMP=EEND-ESTART
+                etmp = eend_initial - estart_initial
+                
+                # ESTART=ESTART-2.*ETMP
+                # EEND=EEND+2.*ETMP  
+                estart = estart_initial - 2.0 * etmp
+                eend = eend_initial + 2.0 * etmp
+                
+                # Number of energy points (Fortran uses NE=20000)
+                ne = 20000
+                
+                # DELE=(EEND-ESTART)/FLOAT(NE-1)
+                dele = (eend - estart) / float(ne - 1)
+                
+                # PLACE ONE OF THE TABLE VALUES FOR ENERGY AT EF +/- (DELE/2)
+                # NETMP=NINT((EF-ESTART)/DELE)
+                # ESTART=EF-(NETMP-0.5)*DELE
+                # EEND=ESTART+(NE-1)*DELE
+                netmp = round((EF - estart) / dele)
+                estart_final = EF - (netmp - 0.5) * dele
+                eend_final = estart_final + (ne - 1) * dele
+                
+                logger.info(f" ESTART,EEND,NE = {estart_final:11.7f}     {eend_final:11.6f}          {ne:5d}")
+                
+                # Debug information to compare with Fortran
+                logger.info(f"Energy range calculation debug:")
+                logger.info(f"  EF = {EF:.7f}")
+                logger.info(f"  PotTIP = {PotTIP:.7f}")
+                logger.info(f"  EF - PotTIP = {EF_minus_PotTIP:.7f}")
+                logger.info(f"  EN0MIN = {EN0MIN:.7f}")
+                logger.info(f"  EN0MAX = {EN0MAX:.7f}")
+                logger.info(f"  Initial: ESTART = {estart_initial:.7f}, EEND = {eend_initial:.7f}")
+                logger.info(f"  After 2x expansion: ESTART = {estart:.7f}, EEND = {eend:.7f}")
+                logger.info(f"  Final: ESTART = {estart_final:.7f}, EEND = {eend_final:.7f}")
+            else:
+                # Fallback values if charge density calculator not available
+                estart_final = -6.6
+                eend_final = 10.2
+                ne = 20000
+                logger.info(f" ESTART,EEND,NE = {estart_final:11.7f}     {eend_final:11.6f}          {ne:5d}")
             
             logger.info(" COMPUTING TABLE OF BULK CHARGE DENSITIES")
             logger.info(" COMPUTING TABLE OF SURFACE CHARGE DENSITIES")

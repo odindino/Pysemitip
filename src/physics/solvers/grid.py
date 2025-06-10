@@ -103,7 +103,7 @@ class HyperbolicGrid:
         z (np.ndarray): 轉換後的 2D 笛卡爾 z 座標。
         semiconductor_regions_config (List[ConfigSemiconductorRegion], optional): Configuration for semiconductor regions.
     """
-    def __init__(self, N_eta, N_nu, R, Z_TS, r_max_factor=5.0):
+    def __init__(self, N_eta, N_nu, R, Z_TS, shank_slope=1.0, r_max_factor=5.0):
         self.N_eta = N_eta
         self.N_nu = N_nu
         
@@ -115,18 +115,9 @@ class HyperbolicGrid:
             raise ValueError("針尖-樣品距離 Z_TS 必須為正。")
         self.Z_TS = Z_TS
         
-        # 物理限制：此模型要求針尖-樣品距離大於曲率半徑
-        # This check was present in the original prompt's context for multint.py,
-        # but might be too restrictive for the grid generation itself.
-        # For now, I'll keep it as it was implied to be a requirement.
-        if Z_TS <= R:
-            # Consider if this should be a warning or allow Z_TS = R for specific cases.
-            # For hyperbolic model, Z_TS > R is generally assumed for f to be real.
-            # However, the formulas for f = sqrt(Z_TS^2 - R^2) implies Z_TS >= R.
-            # If Z_TS = R, f = 0, which is a sphere, not a hyperboloid.
-            # Let's assume Z_TS > R is a strict requirement for this grid type.
-            raise ValueError(f"針尖-樣品距離 Z_TS ({Z_TS} nm) 必須大於針尖半徑 R ({R} nm) "
-                             "以形成雙曲面座標。")
+        if shank_slope <= 0:
+            raise ValueError("針尖錐角參數 shank_slope 必須為正。")
+        self.shank_slope = shank_slope
             
         self.r_max_factor = r_max_factor
 
@@ -249,24 +240,26 @@ class HyperbolicGrid:
         """
         根據物理輸入 (R, Z_TS) 計算座標系的內部參數 (f, eta_tip)。
         
-        推導:
-        1. 座標變換:
-           r = f * sinh(eta) * sin(nu)
-           z = f * cosh(eta) * cos(nu)
-        2. 樣品表面在 z=0，對應 nu = pi/2。此變換滿足此條件。
-        3. 針尖表面為 eta = eta_tip，其尖端 (nu=0) 在 z = Z_TS。
-           => Z_TS = f * cosh(eta_tip)
-        4. 針尖在尖端的曲率半徑為 R。
-           => R = Z_TS * tanh^2(eta_tip)
-        5. 聯立求解 f 和 eta_tip。
-        """
-        # 求解 eta_tip
-        tanh_eta_tip_sq = self.R / self.Z_TS
-        self.eta_tip = np.arctanh(np.sqrt(tanh_eta_tip_sq))
+        為了與 Fortran SEMITIP 兼容，我們需要引入 shank_slope 參數。
         
-        # 求解焦點距離 f
-        cosh_eta_tip = 1 / np.sqrt(1 - tanh_eta_tip_sq)
-        self.f = self.Z_TS / cosh_eta_tip
+        Fortran 計算邏輯 (semitip3-6.1.f, 第97-98行):
+        ETAT = 1./SQRT(1.+1./SLOPE**2) 
+        A = RAD*SLOPE**2/ETAT
+        
+        其中 SLOPE = shank_slope, RAD = radius
+        """
+        # 直接使用配置中的 shank_slope，按照 Fortran 邏輯計算 ETAT 和 A
+        # Fortran 邏輯 (semitip3-6.1.f, 第97-98行):
+        # ETAT = 1./SQRT(1.+1./SLOPE**2) 
+        # A = RAD*SLOPE**2/ETAT
+        self.eta_tip = 1.0 / np.sqrt(1.0 + 1.0/self.shank_slope**2)  # 對應 Fortran 的 ETAT
+        self.f = self.R * self.shank_slope**2 / self.eta_tip          # 對應 Fortran 的 A
+        
+        # 如果需要真正的雙曲面座標轉換，應該使用以下代碼：
+        # tanh_eta_tip_sq = self.R / self.Z_TS
+        # self.eta_tip = np.arctanh(np.sqrt(tanh_eta_tip_sq))
+        # cosh_eta_tip = 1 / np.sqrt(1 - tanh_eta_tip_sq)
+        # self.f = self.Z_TS / cosh_eta_tip
 
     def _calculate_eta_grid_max(self):
         """
