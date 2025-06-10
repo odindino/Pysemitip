@@ -248,34 +248,46 @@ class PoissonSOREquation:
         if N_eta < 2 or N_nu < 1:
             return potential.flat[0] if potential.size > 0 else 0.0
         
-        # In Fortran SEMITIP, PCENT uses VSINT(1,I,K) which represents potential at
-        # the semiconductor surface interface. In our hyperbolic grid:
-        # - eta direction: 0 = tip, N_eta-1 = far field  
-        # - nu direction: 0 = axis, N_nu-1 = sample surface
+        # Fortran PCENT function analysis:
+        # JJ=0: Uses VSINT(1,I,K) - interface potential
+        # Loop is over K=1 to NP (angular points)
+        # Formula: SUM = Σ(K=1 to NP) [(9*VSINT(1,I,k) - VSINT(1,I+1,k))/8]
+        #          PCENT = SUM/NP
+        #
+        # In our coordinate system:
+        # - eta direction: 0 = tip apex, N_eta-1 = far field  
+        # - nu direction: 0 = central axis, N_nu-1 = sample surface
         # 
-        # The semiconductor surface interface corresponds to nu = N_nu-1 (sample surface)
-        # Formula: SUM = Σ(I=1 to NR) [(9*VSINT(1,I,k) - VSINT(1,I+1,k))/8]
-        #          PCENT = SUM/NR (average over radial points at interface)
+        # VSINT represents potential at semiconductor/vacuum interface
+        # In Fortran, this is stored separately; we use potential at nu = N_nu-1
         
-        # Extract interface potential at sample surface (nu = N_nu-1)
-        interface_nu_idx = N_nu - 1
+        # Key insight: Fortran averages over ANGULAR points (K), not radial!
+        # At the interface, we use I=1 (eta=0 in our indexing)
         
-        # Apply Fortran PCENT formula: weighted interpolation in radial direction
+        interface_nu_idx = N_nu - 1  # Sample surface
+        I = 0  # First radial point (I=1 in Fortran)
+        
+        # Apply Fortran PCENT formula
         sum_val = 0.0
-        valid_points = 0
         
-        # Use a range of radial points for averaging, starting from I=0 (I=1 in Fortran)
-        for I in range(min(N_eta - 1, 8)):  # Limit to reasonable number of points
-            if I + 1 < N_eta:
-                # Fortran formula: (9*VSINT(1,I,k) - VSINT(1,I+1,k))/8
-                # VSINT corresponds to potential at interface (sample surface)
-                v1 = potential[I, interface_nu_idx]
-                v2 = potential[I + 1, interface_nu_idx]
-                weighted_value = (9.0 * v1 - v2) / 8.0
-                sum_val += weighted_value
-                valid_points += 1
+        # Check if we have enough points
+        if I + 1 < N_eta:
+            # Get potential values at interface for first two radial points
+            v1 = potential[I, interface_nu_idx]      # VSINT(1,1,K) equivalent
+            v2 = potential[I + 1, interface_nu_idx]  # VSINT(1,2,K) equivalent
+            
+            # Apply weighted average formula
+            # In 2D axisymmetric case, we don't have multiple K values
+            # So we use the single value we have
+            weighted_value = (9.0 * v1 - v2) / 8.0
+            sum_val = weighted_value
+            valid_points = 1
+        else:
+            # Fallback if grid too small
+            sum_val = potential[0, interface_nu_idx] if N_eta > 0 and N_nu > 0 else 0.0
+            valid_points = 1
         
-        # Average over radial points
+        # Since we're in 2D axisymmetric, we don't average over K
         pot0 = sum_val / valid_points if valid_points > 0 else 0.0
         
         return pot0
@@ -295,7 +307,9 @@ class PoissonSOREquation:
             N_eta, N_nu = potential.shape
 
         # 針尖電位 (Dirichlet) - tip surface at eta=0
-        potential[0, :] = V_tip
+        # 但不包括樣品表面的界面點！
+        for j in range(N_nu - 1):  # 不包括 j = N_nu-1 (界面)
+            potential[0, j] = V_tip
 
         # 對稱軸 (Neumann) - central axis at nu=0
         potential[:, 0] = potential[:, 1]
@@ -303,9 +317,9 @@ class PoissonSOREquation:
         # 遠場邊界 (Neumann) - far field at eta=N_eta-1
         potential[N_eta - 1, :] = potential[N_eta - 2, :]
         
-        # Note: Sample surface at nu=N_nu-1 is NOT set to a fixed value here.
-        # Instead, it should be updated based on surface charge density and
-        # interface physics during the iteration process.
+        # 樣品表面 (nu=N_nu-1) 的界面電位應該自由演化
+        # 這對應 Fortran 的 VSINT，它是根據物理條件計算的
+        # 不應該被固定為任何特定值
         
         return potential
 
@@ -318,12 +332,34 @@ class PoissonSOREquation:
             
         potential = np.zeros((N_eta, N_nu))
         
-        # Create linear interpolation between tip and sample
+        # Create a more physical initial guess for hyperbolic coordinates
+        # In hyperbolic coordinates:
+        # - nu = 0 is the central axis (needle tip)
+        # - nu = pi/2 is the sample surface
+        # - eta = eta_tip is the tip surface
+        # - eta -> infinity is far field
+        
         for i in range(N_eta):
             for j in range(N_nu):
-                # Linear interpolation in eta direction (tip to sample)
+                # nu_fraction: 0 at center axis, 1 at sample surface
+                nu_fraction = j / max(N_nu - 1, 1)
+                
+                # eta_fraction: 0 at tip, 1 at far field
                 eta_fraction = i / max(N_eta - 1, 1)
-                potential[i, j] = V_tip * (1 - eta_fraction) + V_sample * eta_fraction
+                eta_decay = np.exp(-2.0 * eta_fraction)  # Exponential decay from tip
+                
+                # FIXED: Don't force interface to V_sample
+                # Instead, create a reasonable gradient that allows interface to evolve
+                if j == N_nu - 1:  # At semiconductor surface (interface)
+                    # Start with a reasonable estimate between V_tip and V_sample
+                    # This will be refined during the iterative solution
+                    # Use a weighted average that depends on eta position
+                    interface_fraction = 0.3 + 0.4 * eta_fraction  # 0.3 to 0.7
+                    potential[i, j] = V_tip * (1 - interface_fraction) + V_sample * interface_fraction
+                else:
+                    # For non-interface points, use the original interpolation
+                    potential[i, j] = V_tip * (1 - nu_fraction) * eta_decay + \
+                                     V_sample * (1 - eta_decay + nu_fraction * eta_decay)
         
         return potential
 
