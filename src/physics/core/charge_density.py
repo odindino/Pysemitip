@@ -147,15 +147,15 @@ class ChargeDensityCalculator:
         # 1. Determine the range of applied bias voltages.
         min_bias = 0.0
         max_bias = 0.0
-        if voltage_scan_config and voltage_scan_config.num_steps > 0:
-            # Ensure num_steps is at least 1 for linspace if start and end are different,
-            # or handle single point scan (num_steps=1 means start_voltage only).
-            if voltage_scan_config.num_steps == 1:
-                voltages = np.array([voltage_scan_config.start_voltage_V])
+        if voltage_scan_config and voltage_scan_config.points > 0:
+            # Ensure points is at least 1 for linspace if start and end are different,
+            # or handle single point scan (points=1 means start voltage only).
+            if voltage_scan_config.points == 1:
+                voltages = np.array([voltage_scan_config.start])
             else:
-                voltages = np.linspace(voltage_scan_config.start_voltage_V,
-                                       voltage_scan_config.end_voltage_V,
-                                       voltage_scan_config.num_steps)
+                voltages = np.linspace(voltage_scan_config.start,
+                                       voltage_scan_config.end,
+                                       voltage_scan_config.points)
             min_bias = np.min(voltages)
             max_bias = np.max(voltages)
         elif self.config.computation: # Single bias from computation config
@@ -165,9 +165,9 @@ class ChargeDensityCalculator:
         # 2. Calculate Contact Potential (CPot) for this region.
         # CPot = tip_work_function - semiconductor_bulk_work_function
         # semiconductor_bulk_work_function = Chi_s + (Ec_bulk - EF_bulk)
-        #                                = electron_affinity + Eg - ef_vb_equilibrium
-        semiconductor_wf = region_physics.electron_affinity + region_physics.Eg - en0_region
-        contact_potential = tip_config.work_function_eV - semiconductor_wf
+        #                                = electron_affinity + band_gap - ef_vb_equilibrium
+        semiconductor_wf = region_physics.electron_affinity + region_physics.band_gap - en0_region
+        contact_potential = tip_config.work_function - semiconductor_wf
 
         # 3. Calculate PotTIP: Tip potential relative to the system Fermi level (E_F_main).
         # PotTIP = applied_bias + contact_potential. This is the effective potential
@@ -197,9 +197,8 @@ class ChargeDensityCalculator:
 
         # 5. Add initial fixed padding (Fortran often uses +/- 0.5 eV before expansion).
         # This value can be configured in the simulation settings.
-        initial_padding_ev = self.config.computation.charge_density_table_initial_padding_eV \
-            if self.config.computation and self.config.computation.charge_density_table_initial_padding_eV is not None \
-            else 0.5  # Default based on common Fortran practice
+        initial_padding_ev = getattr(self.config.computation, 'charge_density_table_initial_padding_eV', 0.5) \
+            if self.config.computation else 0.5  # Default based on common Fortran practice
 
         estart_padded = estart_initial - initial_padding_ev
         eend_padded = eend_initial + initial_padding_ev
@@ -212,9 +211,8 @@ class ChargeDensityCalculator:
         # This expansion provides a safety margin for interpolation accuracy and
         # to cover unexpected potential variations during the Poisson solver's iterations.
         # This factor can be configured in the simulation settings.
-        fortran_expansion_factor = self.config.computation.charge_density_table_expansion_factor \
-            if self.config.computation and self.config.computation.charge_density_table_expansion_factor is not None \
-            else 2.0  # Default to N=2 for 5x expansion, a common Fortran heuristic
+        fortran_expansion_factor = getattr(self.config.computation, 'charge_density_table_expansion_factor', 2.0) \
+            if self.config.computation else 2.0  # Default to N=2 for 5x expansion, a common Fortran heuristic
 
         etmp = eend_padded - estart_padded
         
@@ -252,11 +250,11 @@ class ChargeDensityCalculator:
         
         # Sensible lower bound: Should be below Ev (0) by a margin.
         # (e.g., Ev - (0.5*Eg + padding) or Ev - (1eV + padding))
-        min_sensible_bound = -max(margin_factor * region_physics.Eg, min_abs_margin) - initial_padding_ev
+        min_sensible_bound = -max(margin_factor * region_physics.band_gap, min_abs_margin) - initial_padding_ev
         
         # Sensible upper bound: Should be above Ec (Eg) by a margin.
         # (e.g., Ec + (0.5*Eg + padding) or Ec + (1eV + padding))
-        max_sensible_bound = region_physics.Eg + max(margin_factor * region_physics.Eg, min_abs_margin) + initial_padding_ev
+        max_sensible_bound = region_physics.band_gap + max(margin_factor * region_physics.band_gap, min_abs_margin) + initial_padding_ev
         
         # Ensure the calculated final range is at least as wide as these sensible bounds.
         # If expanded range is narrower, widen it to sensible bounds.

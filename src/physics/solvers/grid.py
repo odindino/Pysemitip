@@ -143,6 +143,7 @@ class HyperbolicGrid:
 
         self.semiconductor_regions_config: Optional[List['ConfigSemiconductorRegion']] = None
         self.region_id_map = None # For storing region IDs for each grid point
+        self.region_id_map_initialized = False # Track initialization status
 
         self._generate_grid()
 
@@ -212,6 +213,9 @@ class HyperbolicGrid:
                         assigned_region_id = self.semiconductor_regions_config[0].id
                         
                 self.region_id_map[eta_idx, nu_idx] = assigned_region_id
+
+        # Mark region_id_map as initialized
+        self.region_id_map_initialized = True
 
 
     def get_region_id_at_point(self, eta_idx: int, nu_idx: int) -> Optional[int]:
