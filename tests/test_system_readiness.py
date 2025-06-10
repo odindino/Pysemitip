@@ -28,7 +28,7 @@ def test_system_readiness():
     
     # 2. 配置檔案測試
     try:
-        config_path = project_root / "data/input/examples/quick_test.yaml"
+        config_path = project_root / "data/input/examples/test/quick_test.yaml"
         config = load_yaml_config(str(config_path))
         print("✓ YAML 配置載入成功")
     except Exception as e:
@@ -113,12 +113,14 @@ def test_system_readiness():
         print("🎉 系統已準備就緒！")
         print("\n下一步:")
         print("1. 安裝科學計算套件: pip install numpy scipy matplotlib pyyaml")
-        print("2. 執行模擬: python run_multint.py data/input/examples/quick_test.yaml --plot")
-        return True
+        print("2. 執行模擬: python run_multint.py data/input/examples/test/quick_test.yaml --plot")
+        # 使用 assert 來滿足 pytest
+        assert True, "系統已準備就緒"
+        return
     else:
         print("❌ 系統尚未完全準備好")
         print("請解決上述問題後再次執行")
-        return False
+        assert False, "系統尚未完全準備好"
 
 if __name__ == "__main__":
     success = test_system_readiness()

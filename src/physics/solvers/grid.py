@@ -3,7 +3,27 @@ from typing import List, Tuple, Optional, TYPE_CHECKING
 from dataclasses import dataclass
 
 if TYPE_CHECKING:
-    # Assuming ConfigSemiconductorRegion will be imported from its actual location
+    def set_material_regions(self, regions_config):
+        """
+        Sets the semiconductor material region configurations for the grid.
+        These configurations are used by get_region_id_at_point and to build the region_id_map.
+
+        Args:
+            regions_config: A list of semiconductor region configuration objects.
+                            Each object is assumed to have 'id', and optionally 
+                            'start_depth_nm' and 'end_depth_nm' attributes.
+                            For MultInt, if depth attributes are missing, regions are 
+                            assigned based on grid geometry.
+        """
+        self.semiconductor_regions_config = regions_config
+        # For MultInt compatibility: only sort if all regions have depth attributes
+        if self.semiconductor_regions_config and all(
+            hasattr(r, 'start_depth_nm') and hasattr(r, 'end_depth_nm') 
+            for r in self.semiconductor_regions_config
+        ):
+            self.semiconductor_regions_config.sort(key=lambda r: r.start_depth_nm)
+        
+        self._build_region_id_map() # Build the map after setting new configsonfigSemiconductorRegion will be imported from its actual location
     # For now, using a forward reference or a more generic type hint if not directly available
     from ...core.config_schema import SemiconductorRegion as ConfigSemiconductorRegion
 
@@ -133,12 +153,17 @@ class HyperbolicGrid:
 
         Args:
             regions_config: A list of semiconductor region configuration objects.
-                            Each object is assumed to have 'id', 'start_depth_nm', 
-                            and 'end_depth_nm' attributes.
+                            Each object is assumed to have 'id', and optionally 
+                            'start_depth_nm' and 'end_depth_nm' attributes.
+                            For MultInt, if depth attributes are missing, regions are 
+                            assigned based on grid geometry.
         """
         self.semiconductor_regions_config = regions_config
-        # Sort regions by start_depth_nm to handle overlapping definitions consistently (first match)
-        if self.semiconductor_regions_config:
+        # For MultInt compatibility: only sort if all regions have depth attributes
+        if self.semiconductor_regions_config and all(
+            hasattr(r, 'start_depth_nm') and hasattr(r, 'end_depth_nm') 
+            for r in self.semiconductor_regions_config
+        ):
             self.semiconductor_regions_config.sort(key=lambda r: r.start_depth_nm)
         
         self._build_region_id_map() # Build the map after setting new configs
@@ -149,22 +174,43 @@ class HyperbolicGrid:
         This map is then used by get_region_id_at_point for quick lookups.
         """
         if self.z is None or self.semiconductor_regions_config is None:
-            self.region_id_map = np.full_like(self.z, fill_value=None, dtype=object) # Or use a sentinel like -1 if IDs are non-negative ints
+            self.region_id_map = np.full_like(self.z, fill_value=None, dtype=object)
             return
 
         self.region_id_map = np.full_like(self.z, fill_value=None, dtype=object)
+        
+        # Check if regions have depth attributes (for MultPlane) or use simple assignment (for MultInt)
+        has_depth_attrs = all(
+            hasattr(r, 'start_depth_nm') and hasattr(r, 'end_depth_nm') 
+            for r in self.semiconductor_regions_config
+        )
+        
         for eta_idx in range(self.N_eta):
             for nu_idx in range(self.N_nu):
                 z_coord = self.z[eta_idx, nu_idx]
                 assigned_region_id = None
-                for region_config in self.semiconductor_regions_config:
-                    if hasattr(region_config, 'start_depth_nm') and hasattr(region_config, 'end_depth_nm'):
+                
+                if has_depth_attrs:
+                    # Use depth-based assignment for MultPlane
+                    for region_config in self.semiconductor_regions_config:
                         if region_config.start_depth_nm <= z_coord < region_config.end_depth_nm:
                             assigned_region_id = region_config.id
                             break # First match based on sorted order
+                else:
+                    # For MultInt: use simple assignment based on grid position or region ID
+                    # Default behavior: assign regions based on z-coordinate and number of regions
+                    if len(self.semiconductor_regions_config) == 1:
+                        assigned_region_id = self.semiconductor_regions_config[0].id
+                    elif len(self.semiconductor_regions_config) == 2:
+                        # Simple 2-region assignment: region 1 for z < 0, region 2 for z >= 0
+                        if z_coord < 0:
+                            assigned_region_id = self.semiconductor_regions_config[0].id
+                        else:
+                            assigned_region_id = self.semiconductor_regions_config[1].id
                     else:
-                        # Consider logging a warning if attributes are missing
-                        pass 
+                        # For more complex cases, assign first region as default
+                        assigned_region_id = self.semiconductor_regions_config[0].id
+                        
                 self.region_id_map[eta_idx, nu_idx] = assigned_region_id
 
 

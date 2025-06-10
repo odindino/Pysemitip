@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import numpy as np
 import logging
 from typing import Dict
@@ -10,6 +11,25 @@ from src.physics.materials.semiconductor import SemiconductorRegion, create_semi
 from src.physics.materials.surface_states import SurfaceRegion
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class SimulationResults:
+    """
+    儲存模擬結果的數據類別
+    """
+    bias_voltage: float
+    current: float = 0.0
+    band_bending: float = 0.0
+    potential_profile: np.ndarray = None
+    charge_density: np.ndarray = None
+    scf_iterations: int = 0
+    convergence_achieved: bool = False
+    
+    def __post_init__(self):
+        if self.potential_profile is None:
+            self.potential_profile = np.array([])
+        if self.charge_density is None:
+            self.charge_density = np.array([])
 
 class MultInt:
     """
@@ -76,8 +96,8 @@ class MultInt:
             logger.warning("Tip Fermi energy is 0.0, check config.tip.fermi_energy.")
 
         self.charge_density_calculator = ChargeDensityCalculator(
-            config=self.config, 
-            semiconductor_regions_physics=self.semiconductor_physics_regions,
+            self.config,  # config_or_regions parameter
+            self.semiconductor_physics_regions,  # semiconductor_regions_physics_or_surface parameter
             surface_regions_physics=self.surface_physics_regions,
             system_fermi_level_E_F_main=tip_fermi_energy 
         )
@@ -271,3 +291,7 @@ class MultInt:
             logger.info(f"--- Finished processing Bias Voltage: {current_bias_V:.3f} V ---")
         
         logger.info("All voltage points processed. Self-consistent loop finished.")
+
+
+# 向後兼容性別名
+MultIntSimulation = MultInt

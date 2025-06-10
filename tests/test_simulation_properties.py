@@ -17,7 +17,7 @@ def test_simulation_properties():
         from src.core.filereader import YamlConfigReader
         
         # Test loading a config file
-        config_path = project_root / "data/input/examples/quick_test.yaml"
+        config_path = project_root / "data/input/examples/test/quick_test.yaml"
         if config_path.exists():
             reader = YamlConfigReader()
             config = reader.load_config(config_path)

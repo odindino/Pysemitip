@@ -142,7 +142,7 @@ class ChargeDensityCalculator:
         # en0_region is the equilibrium Fermi level for this specific region,
         # relative to its own valence band maximum (E_F_equil_region - Ev_bulk_region).
         # This is a key reference point for this region's table.
-        en0_region = region_physics.ef_vb_equilibrium
+        en0_region = region_physics.fermi_level(potential=0.0)  # Calculate equilibrium Fermi level
 
         # 1. Determine the range of applied bias voltages.
         min_bias = 0.0
@@ -298,13 +298,11 @@ class ChargeDensityCalculator:
             # Should not happen if config is validated
             return
 
-        num_energy_points = self.config.computation.charge_density_table_points
+        num_energy_points = self.config.computation.charge_density_table_size
         if num_energy_points <= 1:
             num_energy_points = 200 # Default fallback
 
         for region_id, region_physics in self.semiconductor_regions_physics.items():
-            region_config = self.semiconductor_configs[region_id]
-
             min_energy, max_energy = self._estimate_energy_range_for_region(
                 region_physics,
                 self.config.tip,
