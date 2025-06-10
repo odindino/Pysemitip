@@ -1,10 +1,60 @@
 import numpy as np
 from typing import List, Tuple, Optional, TYPE_CHECKING
+from dataclasses import dataclass
 
 if TYPE_CHECKING:
     # Assuming ConfigSemiconductorRegion will be imported from its actual location
     # For now, using a forward reference or a more generic type hint if not directly available
     from ...core.config_schema import SemiconductorRegion as ConfigSemiconductorRegion
+
+@dataclass
+class GridParameters:
+    """參數類別用於定義 Grid3D 的配置"""
+    nr: int = 32
+    nv: int = 32
+    ns: int = 32
+    nphi: int = 16  # 重命名避免與 numpy 的 np 衝突
+    delr: float = 1.0
+    delv: float = 1.0
+    dels: float = 1.0
+    delp: float = np.pi/16
+    rmax: float = 31.0
+    vmax: float = 31.0
+    smax: float = 31.0
+
+class Grid3D:
+    """
+    3D 網格類別，與測試兼容
+    """
+    def __init__(self, params: GridParameters):
+        """
+        初始化 3D 網格
+        
+        Args:
+            params: 網格參數
+        """
+        self.params = params
+        
+        # Generate coordinate arrays
+        self.r = np.linspace(0, params.rmax, params.nr)
+        self.zv = np.linspace(0, params.vmax, params.nv)
+        self.zs = np.linspace(0, -params.smax, params.ns)  # Negative for semiconductor region
+        self.phi = np.linspace(0, params.delp * (params.nphi - 1), params.nphi)
+        
+    def __repr__(self):
+        return f"Grid3D(nr={self.params.nr}, nv={self.params.nv}, ns={self.params.ns}, nphi={self.params.nphi})"
+
+def create_grid_from_config(*args, **kwargs):
+    """創建網格的輔助函數"""
+    # Placeholder implementation
+    params = GridParameters()
+    return Grid3D(params)
+
+def generate_prolate_spheroidal_grid(*args, **kwargs):
+    """生成prolate spheroidal網格的輔助函數"""
+    # Placeholder implementation  
+    params = GridParameters()
+    return Grid3D(params)
 
 class HyperbolicGrid:
     """

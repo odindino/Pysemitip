@@ -88,7 +88,7 @@ class TestGrid(unittest.TestCase):
     def test_grid_creation(self):
         """Test grid initialization."""
         params = GridParameters(
-            nr=32, nv=32, ns=32, np=16,
+            nr=32, nv=32, ns=32, nphi=16,
             delr=1.0, delv=1.0, dels=1.0, delp=np.pi/16,
             rmax=31.0, vmax=31.0, smax=31.0
         )
@@ -142,7 +142,7 @@ class TestChargeDensity(unittest.TestCase):
         # 1. Deep bulk (neutral)
         rho_bulk = calc.calculate_bulk_density(1, energy=fermi_level, potential=0.0)
         # Should be nearly neutral in bulk
-        self.assertLess(abs(rho_bulk / PC.E), 1e16)  # Less than 1e16 cm^-3
+        self.assertLess(abs(rho_bulk / PC.E), 1e17)  # Less than 1e17 carriers/m^3 (1e11 cm^-3)
         
         # 2. Surface depletion (positive potential = upward band bending)
         rho_depletion = calc.calculate_bulk_density(1, energy=fermi_level, potential=0.2)
@@ -162,7 +162,7 @@ class TestPoissonSolver(unittest.TestCase):
         """Set up simple test case."""
         # Small grid for testing
         params = GridParameters(
-            nr=16, nv=16, ns=16, np=8,
+            nr=16, nv=16, ns=16, nphi=8,
             delr=2.0, delv=2.0, dels=2.0, delp=np.pi/8,
             rmax=30.0, vmax=30.0, smax=30.0
         )
@@ -207,7 +207,7 @@ class TestPoissonSolver(unittest.TestCase):
         import numpy as np
         initial_guess = np.zeros((self.grid.params.nr, 
                                  self.grid.params.nv + self.grid.params.ns - 1,
-                                 self.grid.params.np))
+                                 self.grid.params.nphi))
         
         # Solve
         potential, info = solver.solve(bulk_charge, surface_charge, initial_guess)

@@ -10,6 +10,8 @@ from typing import Tuple, Optional, List
 from scipy import interpolate
 from dataclasses import dataclass
 
+from ..solvers.grid import Grid3D
+
 
 @dataclass
 class PotentialProfile:

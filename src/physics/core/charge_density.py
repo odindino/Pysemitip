@@ -9,18 +9,18 @@ import numpy as np # Ensure numpy is imported
 from scipy import special, optimize
  # Added for type hinting if potential_matrix_Volts is np.ndarray
 
-from typing import Dict, List, Tuple, Optional, TYPE_CHECKING, Any
+from typing import Dict, List, Tuple, Optional, TYPE_CHECKING, Any # Ensure Dict, Optional, Any are imported
 from dataclasses import dataclass, field
 
 from ...utils.constants import PhysicalConstants as PC
 # from ..materials.semiconductor import SemiconductorRegion # Physics material class
 # from ..materials.surface_states import SurfaceRegion # Physics material class
-from ...core.config_schema import SemitipConfig, SemiconductorRegionConfig, TipConfig, VoltageScanConfig
+from ...core.config_schema import SemitipConfig, TipConfig, VoltageScanConfig
 
 if TYPE_CHECKING:
-    from ..materials.semiconductor import SemiconductorRegion as SemiconductorRegionPhysics # Physics material class
-    # from ..materials.surface_states import SurfaceRegion # Forward reference if not fully defined/used yet
-    from ...core.config_schema import SemiconductorRegion as ConfigSemiconductorRegion
+    from ..materials.semiconductor import SemiconductorRegion as SemiconductorRegionPhysics
+    from ..materials.surface_states import SurfaceRegion as SurfaceRegionPhysics # Assuming this is the physics class for surface states
+    # from ...core.config_schema import SemiconductorRegion as ConfigSemiconductorRegion
 
 
 @dataclass
@@ -31,8 +31,17 @@ class ChargeDensityTable:
     valence band maximum (ef_local_rel_local_vb).
     """
     region_id: int
-    potential_axis_rel_vb: np.ndarray  # Energy axis (ef_local_rel_local_vb) in eV
-    rho_table: np.ndarray              # Charge density in C/m^3
+    # Potential axis relative to the region's valence band maximum (ef_val_rel_vb in Fortran)
+    # This is E_F - E_V_local where E_V_local = Ev_abs - q*Potential_local
+    # So, ef_val_rel_vb = E_F_system - (Ev_abs_region - q*Potential_local)
+    potential_axis_rel_vb: np.ndarray = field(default_factory=lambda: np.array([])) # Units: eV
+    # Corresponding charge densities (rho in C/cm^3)
+    charge_density_axis: np.ndarray = field(default_factory=lambda: np.array([])) # Units: C/cm^3
+
+    # Store band edges and Fermi level used for this table for context/debugging
+    Ev_abs_eV: Optional[float] = None # Absolute VB max energy (at V=0) for this region
+    Ec_abs_eV: Optional[float] = None # Absolute CB min energy (at V=0) for this region
+    system_fermi_level_eV: Optional[float] = None # System Fermi level E_F_main
 
 
 class ChargeDensityCalculator:
@@ -42,53 +51,64 @@ class ChargeDensityCalculator:
 
     def __init__(
         self,
-        config: SemitipConfig,
-        semiconductor_regions_physics: Dict[int, 'SemiconductorRegionPhysics'],
-        surface_regions_physics: Optional[Dict[int, Any]] = None, # Changed 'SurfaceRegion' to Any
-        system_fermi_level_E_F_main: float = 0.0  # System Fermi level in eV
+        config_or_regions,  # Can be SemitipConfig or List of regions (backward compatibility)
+        semiconductor_regions_physics_or_surface=None, # Can be Dict[int, SemiconductorRegionPhysics] or List (backward compatibility)
+        surface_regions_physics: Optional[Dict[int, 'SurfaceRegionPhysics']] = None, # Use SurfaceRegionPhysics type hint
+        system_fermi_level_E_F_main: float = 0.0,  # System Fermi level in eV
+        fermi_level: Optional[float] = None  # Backward compatibility parameter
     ):
         """
         Initializes the ChargeDensityCalculator.
+        
+        Supports two calling patterns:
+        1. New: ChargeDensityCalculator(config, semiconductor_regions_physics, surface_regions_physics, system_fermi_level)
+        2. Old: ChargeDensityCalculator([regions], [], fermi_level=fermi_level)
 
         Args:
-            config: The main SemitipConfig object.
-            semiconductor_regions_physics: A dictionary mapping region_id to
-                                           SemiconductorRegion (physics) objects.
-            surface_regions_physics: (Optional) A dictionary mapping region_id to
-                                     SurfaceRegion (physics) objects.
+            config_or_regions: Either SemitipConfig object or List of semiconductor regions (backward compatibility)
+            semiconductor_regions_physics_or_surface: Either Dict[int, SemiconductorRegionPhysics] or empty list (backward compatibility)
+            surface_regions_physics: (Optional) A dictionary mapping region_id to SurfaceRegion (physics) objects.
             system_fermi_level_E_F_main: The system's main Fermi level (EF_main) in eV.
-                                         This is the reference energy level for the entire system.
-                                         In equilibrium, and far from the tip, the local Fermi level
-                                         in the semiconductor will align with this value.
+            fermi_level: Backward compatibility parameter, used when called with old signature
         """
-        self.config = config
-        self.semiconductor_configs: Dict[int, SemiconductorRegionConfig] = {
-            region.id: region for region in config.semiconductor.regions
-        }
-        self.semiconductor_regions_physics = semiconductor_regions_physics
-        self.surface_regions_physics = surface_regions_physics if surface_regions_physics else {}
-        
-        self.E_F_main = system_fermi_level_E_F_main # Overall system Fermi level
+        # Detect calling pattern
+        if isinstance(config_or_regions, list) and fermi_level is not None:
+            # Old calling pattern: ChargeDensityCalculator([regions], [], fermi_level=fermi_level)
+            regions_list = config_or_regions
+            self.config = None  # No config in old pattern
+            self.semiconductor_regions_physics = {region.region_id: region for region in regions_list}
+            self.surface_regions_physics = {}
+            self.system_fermi_level_E_F_main_eV = fermi_level
+        else:
+            # New calling pattern
+            self.config = config_or_regions
+            self.semiconductor_regions_physics = semiconductor_regions_physics_or_surface
+            self.surface_regions_physics = surface_regions_physics or {}
+            self.system_fermi_level_E_F_main_eV = system_fermi_level_E_F_main
 
-        # Ev_abs_for_charge_calc: Absolute energy of the valence band maximum (Ev)
-        # for each region when the local electrostatic potential is zero.
-        # This is E_F_main - ef_vb_equilibrium, where ef_vb_equilibrium is
-        # the equilibrium Fermi level relative to the valence band for that region.
-        # Or, more directly from physics object: region_physics.Ev_abs_zero_potential
-        self.Ev_abs_for_charge_calc: Dict[int, float] = {}
-        for region_id, region_physics in self.semiconductor_regions_physics.items():
-            self.Ev_abs_for_charge_calc[region_id] = region_physics.Ev_abs_zero_potential
-            # print(f"Region {region_id}: Ev_abs_for_charge_calc = {self.Ev_abs_for_charge_calc[region_id]:.4f} eV (EF_main={self.E_F_main:.4f}, ef_vb_eq={region_physics.ef_vb_equilibrium:.4f})")
+        # Ev_abs_for_charge_calc_eV and Ec_abs_for_charge_calc_eV are now attributes
+        # of the SemiconductorRegionPhysics objects themselves, calculated in their __post_init__.
+        # No need to calculate and setattr here. They can be accessed via:
+        # region_physics = self.semiconductor_regions_physics[region_id]
+        # ev_abs = region_physics.Ev_abs_for_charge_calc_eV
+        # ec_abs = region_physics.Ec_abs_for_charge_calc_eV
+        
+        # Log to confirm access if needed during debugging:
+        # for r_id, r_phys in self.semiconductor_regions_physics.items():
+        #     logger.debug(f"Region {r_id}: Ev_abs={r_phys.Ev_abs_for_charge_calc_eV}, Ec_abs={r_phys.Ec_abs_for_charge_calc_eV}")
 
         self.charge_density_tables: Dict[int, ChargeDensityTable] = {}
-        self._build_charge_density_tables()
+        
+        # Only build tables if we have config (new calling pattern)
+        if self.config is not None:
+            self._build_charge_density_tables() # This method will populate the tables
 
     def _estimate_energy_range_for_region(
         self,
-        region_config: SemiconductorRegionConfig,
+        # region_config: SemiconductorRegionConfig, # This was config class, now we use physics class
         region_physics: 'SemiconductorRegionPhysics',
-        tip_config: TipConfig,
-        voltage_scan_config: Optional[VoltageScanConfig]
+        tip_config: TipConfig, # from main config
+        voltage_scan_config: Optional[VoltageScanConfig] # from main config
     ) -> Tuple[float, float]:
         """
         Estimates the energy range (min and max ef_local_rel_local_vb) for a given
@@ -286,7 +306,6 @@ class ChargeDensityCalculator:
             region_config = self.semiconductor_configs[region_id]
 
             min_energy, max_energy = self._estimate_energy_range_for_region(
-                region_config,
                 region_physics,
                 self.config.tip,
                 self.config.voltage_scan
@@ -303,7 +322,7 @@ class ChargeDensityCalculator:
             self.charge_density_tables[region_id] = ChargeDensityTable(
                 region_id=region_id,
                 potential_axis_rel_vb=potential_axis_rel_vb,
-                rho_table=rho_values
+                charge_density_axis=rho_values
             )
             # print(f"Built charge density table for region {region_id}:")
             # print(f"  Potential axis (ef_local_rel_local_vb): {potential_axis_rel_vb.min():.2f} to {potential_axis_rel_vb.max():.2f} eV, {len(potential_axis_rel_vb)} points")
@@ -337,13 +356,13 @@ class ChargeDensityCalculator:
         # So, E_F_local - Ec_local = E_F_local - (Ev_local + Eg) = (E_F_local - Ev_local) - Eg = ef_val_rel_vb - Eg
         # And Ev_local - E_F_local = -(E_F_local - Ev_local) = -ef_val_rel_vb
 
-        kT_eV = PC.k_B_eV_K * region_physics.temperature_K
+        kT_eV = PC.KB_EV * region_physics.temperature
 
-        eta_c = (ef_val_rel_vb - region_physics.Eg) / kT_eV
+        eta_c = (ef_val_rel_vb - region_physics.band_gap) / kT_eV
         eta_v = -ef_val_rel_vb / kT_eV # Note: F_1/2 argument is (Ev-EF)/kT
 
-        n = region_physics.Nc * special.fdhalf(eta_c)  # m^-3
-        p = region_physics.Nv * special.fdhalf(eta_v)  # m^-3
+        n = region_physics.Nc * region_physics._simple_fermi_integral(eta_c)  # cm^-3
+        p = region_physics.Nv * region_physics._simple_fermi_integral(eta_v)  # cm^-3
         
         # Ionized dopants
         # For donors: N_D_plus = N_D / (1 + g_D * exp((E_F_local - E_D_local) / kT))
@@ -353,12 +372,12 @@ class ChargeDensityCalculator:
         #                       = (E_F_local - Ev_local) - Eg + Ed_binding
         #                       = ef_val_rel_vb - Eg + Ed_binding
         N_D_plus = 0.0
-        if region_physics.Nd > 1e6 and region_physics.Ed_ion_eV is not None: # Check if donors are present
-            # Ed_ion_eV is the ionization energy (usually positive, Ec - Ed)
-            # The energy level Ed is Eg - Ed_ion_eV relative to Ev
-            # Ef - Ed = ef_val_rel_vb - (Eg - Ed_ion_eV)
-            donor_exp_arg = (ef_val_rel_vb - region_physics.Eg + region_physics.Ed_ion_eV) / kT_eV
-            N_D_plus = region_physics.Nd / (1.0 + region_physics.gD * np.exp(donor_exp_arg))
+        if region_physics.donor_concentration > 1e6 and region_physics.donor_binding_energy is not None: # Check if donors are present
+            # donor_binding_energy is the ionization energy (usually positive, Ec - Ed)
+            # The energy level Ed is band_gap - donor_binding_energy relative to Ev
+            # Ef - Ed = ef_val_rel_vb - (band_gap - donor_binding_energy)
+            donor_exp_arg = (ef_val_rel_vb - region_physics.band_gap + region_physics.donor_binding_energy) / kT_eV
+            N_D_plus = region_physics.donor_concentration / (1.0 + 2.0 * np.exp(donor_exp_arg))
 
         # For acceptors: N_A_minus = N_A / (1 + g_A * exp((E_A_local - E_F_local) / kT))
         # E_A_local is the acceptor energy level. Ea_binding is E_A_local - Ev_local.
@@ -367,14 +386,14 @@ class ChargeDensityCalculator:
         #                       = Ea_binding - (E_F_local - Ev_local)
         #                       = Ea_binding - ef_val_rel_vb
         N_A_minus = 0.0
-        if region_physics.Na > 1e6 and region_physics.Ea_ion_eV is not None: # Check if acceptors are present
-            # Ea_ion_eV is the ionization energy (usually positive, Ea - Ev)
-            # The energy level Ea is Ea_ion_eV relative to Ev
-            # Ea - Ef = Ea_ion_eV - ef_val_rel_vb
-            acceptor_exp_arg = (region_physics.Ea_ion_eV - ef_val_rel_vb) / kT_eV
-            N_A_minus = region_physics.Na / (1.0 + region_physics.gA * np.exp(acceptor_exp_arg))
+        if region_physics.acceptor_concentration > 1e6 and region_physics.acceptor_binding_energy is not None: # Check if acceptors are present
+            # acceptor_binding_energy is the ionization energy (usually positive, Ea - Ev)
+            # The energy level Ea is acceptor_binding_energy relative to Ev
+            # Ea - Ef = acceptor_binding_energy - ef_val_rel_vb
+            acceptor_exp_arg = (region_physics.acceptor_binding_energy - ef_val_rel_vb) / kT_eV
+            N_A_minus = region_physics.acceptor_concentration / (1.0 + 4.0 * np.exp(acceptor_exp_arg))
             
-        rho_total_SI = PC.e_C * (p - n + N_D_plus - N_A_minus) # C/m^3
+        rho_total_SI = PC.E * (p - n + N_D_plus - N_A_minus) # C/m^3
         return rho_total_SI
 
 
@@ -442,7 +461,7 @@ class ChargeDensityCalculator:
                 continue
 
             # ef_query_values: local Fermi level relative to local valence band max (E_F_local - Ev_local)
-            # E_F_local = E_F_main - potential_V  (if potential_V is energy in eV, or e*potential_V if V is volts)
+            # E_F_local = E_F_main - potential_matrix_Volts  (if potential_V is energy in eV, or e*potential_V if V is volts)
             # Let's be careful with units. potential_matrix_Volts is in Volts.
             # E_F_local_eV = self.E_F_main (eV) - potential_matrix_Volts (V)
             # Ev_local_eV  = self.Ev_abs_for_charge_calc[region_id] (eV) - potential_matrix_Volts (V)
@@ -493,9 +512,9 @@ class ChargeDensityCalculator:
             rho_matrix_SI[mask] = np.interp(
                 ef_query_values,
                 table.potential_axis_rel_vb,
-                table.rho_table,
-                left=table.rho_table[0],  # Extrapolate with edge values
-                right=table.rho_table[-1]
+                table.charge_density_axis,
+                left=table.charge_density_axis[0],  # Extrapolate with edge values
+                right=table.charge_density_axis[-1]
             )
             
             if charge_output_data is not None and region_id not in charge_output_data:
@@ -505,7 +524,7 @@ class ChargeDensityCalculator:
                 charge_output_data[region_id]['potentials_at_mask'] = potential_matrix_Volts[mask]
                 charge_output_data[region_id]['rho_at_mask'] = rho_matrix_SI[mask]
                 charge_output_data[region_id]['table_axis'] = table.potential_axis_rel_vb
-                charge_output_data[region_id]['table_rho'] = table.rho_table
+                charge_output_data[region_id]['table_rho'] = table.charge_density_axis
 
 
         # Handle surface charges if any (simplified for now)
@@ -562,7 +581,7 @@ class ChargeDensityCalculator:
                 rho_min_expanded = charge_neutrality_condition(search_min_ev)
                 rho_max_expanded = charge_neutrality_condition(search_max_ev)
                 if np.sign(rho_min_expanded) == np.sign(rho_max_expanded) and rho_min_expanded != 0:
-                    # print(f"Error: Still no zero crossing for region {region_id} in expanded range [{search_min_ev:.2f}, {search_max_ev:.2f}] eV. Rho: [{rho_min_expanded:.2e}, {rho_max_expanded:.2e}]. Using mid-gap as fallback.")
+                    # print(f"Error: Still no zero crossing for region {region_id} in expanded range [{search_min_ev:.2f}, {search_max_ev:.2f}] ev. Rho: [{rho_min_expanded:.2e}, {rho_max_expanded:.2e}]. Using mid-gap as fallback.")
                     # Fallback: intrinsic Fermi level or mid-gap (approximation)
                     # For simplicity, if heavily N-doped, EF is near Ec. If P-doped, near Ev.
                     if region_physics.Nd > region_physics.Na:
@@ -594,6 +613,86 @@ class ChargeDensityCalculator:
             # This should be handled more robustly, perhaps by adjusting search range or method
             return region_physics.Eg / 2.0 # Simplistic fallback
 
+    def _electron_density_direct(self, region_physics: 'SemiconductorRegionPhysics', fermi_level: float, potential: float = 0.0) -> float:
+        """
+        Calculate electron density directly using Fermi-Dirac statistics.
+        
+        Args:
+            region_physics: The semiconductor region physics object
+            fermi_level: Fermi level position (eV) relative to valence band maximum  
+            potential: Electrostatic potential (V)
+            
+        Returns:
+            Electron density (cm^-3)
+        """
+        # Convert fermi_level and potential to ef_val_rel_vb
+        ef_val_rel_vb = fermi_level - potential  # Convert V to eV assuming e=1
+        
+        kT_eV = PC.KB_EV * region_physics.temperature
+        eta_c = (ef_val_rel_vb - region_physics.band_gap) / kT_eV
+        
+        # Calculate electron density in cm^-3 using the custom Fermi-Dirac integral
+        fermi_integral = region_physics._simple_fermi_integral(eta_c)
+        n_cm3 = region_physics.Nc * fermi_integral
+        
+        return n_cm3
+
+    def _hole_density_direct(self, region_physics: 'SemiconductorRegionPhysics', fermi_level: float, potential: float = 0.0) -> float:
+        """
+        Calculate hole density directly using Fermi-Dirac statistics.
+        
+        Args:
+            region_physics: The semiconductor region physics object
+            fermi_level: Fermi level position (eV) relative to valence band maximum
+            potential: Electrostatic potential (V)
+            
+        Returns:
+            Hole density (cm^-3)
+        """
+        # Convert fermi_level and potential to ef_val_rel_vb
+        ef_val_rel_vb = fermi_level - potential  # Convert V to eV assuming e=1
+        
+        kT_eV = PC.KB_EV * region_physics.temperature
+        eta_v = -ef_val_rel_vb / kT_eV  # Note: F_1/2 argument is (Ev-EF)/kT
+        
+        # Calculate hole density in cm^-3 using the custom Fermi-Dirac integral
+        fermi_integral = region_physics._simple_fermi_integral(eta_v)
+        p_cm3 = region_physics.Nv * fermi_integral
+        
+        return p_cm3
+
+    def calculate_bulk_density(self, region_id: int, energy: float, potential: float = 0.0) -> float:
+        """
+        Calculate bulk charge density for a region at a given energy and potential.
+        This method is used by tests and provides a simple interface to calculate
+        charge density at a specific point.
+        
+        Args:
+            region_id: The ID of the semiconductor region
+            energy: The Fermi energy level (eV) relative to valence band maximum
+            potential: The electrostatic potential (V)
+            
+        Returns:
+            Bulk charge density (C/m^3)
+        """
+        # Use the table-based calculation if available
+        if region_id in self.charge_density_tables:
+            # Convert energy and potential to ef_val_rel_vb
+            ef_val_rel_vb = energy - potential  # Assuming 1V = 1eV for simplicity
+            
+            table = self.charge_density_tables[region_id]
+            # Interpolate from the table
+            rho_SI = np.interp(
+                ef_val_rel_vb,
+                table.potential_axis_rel_vb,
+                table.charge_density_axis,
+                left=table.charge_density_axis[0],
+                right=table.charge_density_axis[-1]
+            )
+            return rho_SI
+        else:
+            # Fallback to direct calculation
+            return self._calculate_rho_for_table_entry(energy - potential, region_id)
 
 # Example usage (for testing purposes, if run directly)
 if __name__ == '__main__':

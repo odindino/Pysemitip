@@ -59,6 +59,10 @@ class SemiconductorRegion:
     # Cached property for average valence band effective mass
     _vb_effective_mass_avg_cached: Optional[float] = field(default=None, init=False, repr=False)
 
+    # Add new attributes for absolute band edges at V=0
+    Ec_abs_for_charge_calc_eV: float = field(init=False, repr=False)
+    Ev_abs_for_charge_calc_eV: float = field(init=False, repr=False)
+
     @property
     def vb_effective_mass_avg(self) -> float:
         """
@@ -107,13 +111,21 @@ class SemiconductorRegion:
     def __post_init__(self):
         """Calculate derived quantities."""
         # Average valence band effective mass (Fortran formula)
-        self.vb_effective_mass_avg = np.exp(
-            2.0 * np.log(np.sqrt(self.vb_effective_mass_heavy**3) + 
-                        np.sqrt(self.vb_effective_mass_light**3)) / 3.0
-        )
-        
+        # Ensure self.vb_effective_mass_heavy and self.vb_effective_mass_light are available
+        # The attachment shows a @property vb_effective_mass_avg and also a calculation here.
+        # Consolidate this. Using the direct calculation from attachment's __post_init__.
+        if hasattr(self, 'vb_effective_mass_heavy') and hasattr(self, 'vb_effective_mass_light'):
+             # Guard against cases where these might not be initialized if the dataclass init is complex
+            self._vb_effective_mass_avg_cached = np.exp( # Use the cached version consistently
+                2.0 * np.log(np.sqrt(self.vb_effective_mass_heavy**3) + 
+                            np.sqrt(self.vb_effective_mass_light**3)) / 3.0
+            )
+        else:
+            # Fallback or error if masses not available for avg calculation
+            self._vb_effective_mass_avg_cached = self.cb_effective_mass # Placeholder, should not happen
+
         # Thermal energy
-        self.kT = PC.thermal_energy(self.temperature)
+        self.kT = PC.thermal_energy(self.temperature) # PC.thermal_energy uses KB_EV * temp
         
         # Initialize carrier concentration variables
         self.Nc = 0.0
@@ -121,7 +133,12 @@ class SemiconductorRegion:
         self.ni = 0.0
         
         # Calculate intrinsic carrier concentration
-        self._calculate_intrinsic_concentration()
+        self._calculate_intrinsic_concentration() # This uses self.kT, self.cb_effective_mass, self.vb_effective_mass_avg
+
+        # Calculate and store absolute band edges at V=0 (vacuum level = 0.0)
+        # These methods (conduction_band_edge, valence_band_edge) must exist and be correct.
+        self.Ec_abs_for_charge_calc_eV = self.conduction_band_edge(vacuum_level=0.0)
+        self.Ev_abs_for_charge_calc_eV = self.valence_band_edge(vacuum_level=0.0)
     
     def _calculate_intrinsic_concentration(self):
         """Calculate intrinsic carrier concentration using Fortran constants."""
@@ -401,6 +418,7 @@ class SemiconductorRegion:
         class MinimalGrid:
             N_eta = 1
             N_nu = 1
+            computation = None  # Skip charge density table building
             
         calc = ChargeDensityCalculator(MinimalGrid(), MinimalProps(self))
         return calc._electron_density_direct(self, fermi_level, potential)
@@ -433,6 +451,7 @@ class SemiconductorRegion:
         class MinimalGrid:
             N_eta = 1
             N_nu = 1
+            computation = None  # Skip charge density table building
             
         calc = ChargeDensityCalculator(MinimalGrid(), MinimalProps(self))
         return calc._hole_density_direct(self, fermi_level, potential)

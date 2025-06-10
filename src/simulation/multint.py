@@ -1,134 +1,93 @@
 import numpy as np
 import logging
-import time
+from typing import Dict
 
-# 【修改】導入新的核心模組
+from src.core.config_schema import SemitipConfig
 from src.physics.solvers.grid import HyperbolicGrid
 from src.physics.core.poisson import PoissonSOREquation
-# 舊的導入將不再使用： from src.physics.solvers.grid import CylindricalGrid
-# 舊的導入將不再使用： from src.physics.core.poisson import PoissonSolver
-
 from src.physics.core.charge_density import ChargeDensityCalculator
 from src.physics.materials.semiconductor import SemiconductorRegion, create_semiconductor_from_config
 from src.physics.materials.surface_states import SurfaceRegion
-from dataclasses import dataclass
-from typing import List
-
-# ... (如果 MultInt 中有其他導入，保持不變)
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class SimulationProperties:
-    """Simple container for simulation properties needed by physics modules."""
-    semiconductor: 'SemiconductorConfig'
-    surface: 'SurfaceConfig'
-    tip: 'TipConfig'
-    
-    @property
-    def fermi_level(self):
-        """Get Fermi level from first semiconductor region."""
-        if self.semiconductor.regions:
-            return self.semiconductor.regions[0].fermi_level()
-        return 0.0
 
 class MultInt:
     """
     執行自洽計算以模擬 STM 與半導體樣品間的交互作用。
     【此版本已更新，以使用雙曲面網格和新的 SOR 解法器】
     """
-    def __init__(self, config, output_dir: str): # 修改：增加 output_dir 參數
+    def __init__(self, config: SemitipConfig, output_dir: str):
         self.config = config
-        self.output_dir = output_dir # 新增：儲存輸出目錄
-        
-        # Create props object with necessary attributes
-        self.props = self._create_simulation_properties(config)
-        
-        # 【修改】建立新的雙曲面網格
-        self.grid = self._create_grid()
-        
-        # 電荷密度計算模組保持不變，但現在會在雙曲面網格上運作
-        self.charge_density = ChargeDensityCalculator(self.grid, self.props)
+        self.output_dir = output_dir
+        logger.info(f"MultInt simulation initialized with config type: {config.simulation_type}")
+        logger.info(f"Output directory: {self.output_dir}")
 
-        # 【修改】初始化新的 SOR 解法器
-        self.poisson_solver = PoissonSOREquation(self.grid, self.props)
-        
-        self.results = {}
+        # Initialize semiconductor physics regions
+        self.semiconductor_physics_regions: Dict[int, SemiconductorRegion] = {}
+        if self.config.semiconductor and self.config.semiconductor.regions:
+            for region_config in self.config.semiconductor.regions:
+                try:
+                    # Ensure config.environment.temperature is accessible
+                    env_temp = getattr(getattr(self.config, 'environment', None), 'temperature', 300.0)
 
-    def _create_simulation_properties(self, config):
-        """
-        Create a SimulationProperties object from config.
+                    physics_region = create_semiconductor_from_config(
+                        region_config,
+                        env_temp
+                    )
+                    self.semiconductor_physics_regions[physics_region.region_id] = physics_region
+                    logger.info(f"Created semiconductor physics region ID {physics_region.region_id} "
+                                f"(Ev_abs={physics_region.Ev_abs_for_charge_calc_eV:.3f} eV, "
+                                f"Ec_abs={physics_region.Ec_abs_for_charge_calc_eV:.3f} eV, "
+                                f"Permittivity={physics_region.permittivity})")
+                except Exception as e:
+                    logger.error(f"Error creating semiconductor physics region from config ID {region_config.id}: {e}")
+                    raise
         
-        This converts the config data classes into the physics material classes
-        needed by the physics modules.
-        """
-        # Convert semiconductor regions from config to physics objects
-        semiconductor_regions = []
-        for region_config in config.semiconductor.regions:
-            # Pass environment temperature to the factory function
-            semiconductor_region = create_semiconductor_from_config(
-                region_config, 
-                config.environment.temperature
-            )
-            semiconductor_regions.append(semiconductor_region)
+        # Initialize surface physics regions (placeholder, adapt as needed)
+        self.surface_physics_regions: Dict[int, SurfaceRegion] = {} # SurfaceRegion is the physics class
+        if self.config.surface and self.config.surface.regions:
+            logger.warning("Surface region physics object creation is a placeholder and may need full implementation.")
+            # Example:
+            # for surf_region_config in self.config.surface.regions:
+            #     try:
+            #         # Assuming SurfaceRegion takes config directly or has a creator function
+            #         # physics_surf_region = SurfaceRegion(**dataclasses.asdict(surf_region_config))
+            #         # self.surface_physics_regions[physics_surf_region.id] = physics_surf_region
+            #         # logger.info(f"Created surface physics region ID {physics_surf_region.id}")
+            #     except Exception as e:
+            #         logger.error(f"Error creating surface physics region from config ID {surf_region_config.id}: {e}")
+            #         # Decide to raise or continue
+            pass
+
+
+        self.grid = self._create_grid() # Uses self.config for grid parameters
         
-        # Convert surface regions from config to physics objects
-        surface_regions = []
-        for region_config in config.surface.regions:
-            # Get position from config if available, otherwise default to (0, 0)
-            position = (getattr(region_config, 'x_position', 0.0), 
-                       getattr(region_config, 'y_position', 0.0))
-            
-            # Convert distributions from config to physics objects
-            from src.physics.materials.surface_states import SurfaceStateDistribution
-            
-            dist1 = None
-            if region_config.first_distribution:
-                d = region_config.first_distribution
-                dist1 = SurfaceStateDistribution(
-                    density=d.density,
-                    neutrality_level=d.neutrality_level,
-                    fwhm=d.fwhm,
-                    center_energy=d.center_energy
-                )
-            
-            dist2 = None  
-            if region_config.second_distribution:
-                d = region_config.second_distribution
-                dist2 = SurfaceStateDistribution(
-                    density=d.density,
-                    neutrality_level=d.neutrality_level,
-                    fwhm=d.fwhm,
-                    center_energy=d.center_energy
-                )
-            
-            surface_region = SurfaceRegion(
-                region_id=region_config.id,
-                position=position,
-                distribution1=dist1,
-                distribution2=dist2,
-                temperature=config.environment.temperature
-            )
-            surface_regions.append(surface_region)
+        # Ensure region_id_map is built and assigned to grid object after semiconductor regions are defined in config
+        if hasattr(self.grid, 'set_material_regions') and self.config.semiconductor:
+             self.grid.set_material_regions(self.config.semiconductor.regions) # Pass list of ConfigSemiconductorRegion
+        else:
+            logger.warning("Grid does not have set_material_regions or semiconductor config missing for region_id_map.")
+
+
+        # ChargeDensityCalculator initialization
+        # It needs system_fermi_level_E_F_main which is typically tip's Fermi energy
+        tip_fermi_energy = getattr(getattr(self.config, 'tip', None), 'fermi_energy', 0.0)
+        if tip_fermi_energy == 0.0:
+            logger.warning("Tip Fermi energy is 0.0, check config.tip.fermi_energy.")
+
+        self.charge_density_calculator = ChargeDensityCalculator(
+            config=self.config, 
+            semiconductor_regions_physics=self.semiconductor_physics_regions,
+            surface_regions_physics=self.surface_physics_regions,
+            system_fermi_level_E_F_main=tip_fermi_energy 
+        )
+
+        # Poisson solver uses grid and the main config (props was config)
+        self.poisson_solver = PoissonSOREquation(self.grid, self.config)
         
-        # Create the properties object with proper structure
-        # We'll create a simple object that mimics the config structure
-        # but contains the physics objects
-        class Props:
-            def __init__(self):
-                self.semiconductor = type('obj', (object,), {
-                    'regions': semiconductor_regions,
-                    'epsilon_r': config.environment.dielectric_constant,
-                    'fermi_level': semiconductor_regions[0].fermi_level() if semiconductor_regions else 0.0
-                })()
-                self.surface = type('obj', (object,), {
-                    'regions': surface_regions
-                })()
-                self.tip = config.tip
-        
-        return Props()
-    
+        self.results = {} # To store results per voltage point
+        logger.info("MultInt components initialized.")
+
     def _create_grid(self):
         """
         【修改】根據物理參數建立雙曲面網格。
@@ -136,99 +95,179 @@ class MultInt:
         grid_params = self.config.grid
         tip_params = self.config.tip
         
-        logger.info("正在建立雙曲面網格...")
+        logger.info("Creating HyperbolicGrid...")
+        logger.info(f"Grid Params: N_eta (radial_points)={grid_params.radial_points}, N_nu (angular_points)={grid_params.angular_points}")
+        logger.info(f"Tip Params: Radius={tip_params.radius} nm, Separation={tip_params.separation} nm")
         try:
-            # Ensure separation > radius for hyperbolic grid model
-            separation = tip_params.separation
-            if separation <= tip_params.radius:
-                logger.warning(f"調整針尖-樣品距離從 {separation} nm 到 {tip_params.radius * 1.1} nm 以滿足雙曲面網格要求")
-                separation = tip_params.radius * 1.1
-                
+            # Assuming HyperbolicGrid takes N_eta, N_nu, R, Z_TS
+            # Mapping config names: radial_points -> N_eta, angular_points -> N_nu
+            # R -> tip_params.radius, Z_TS -> tip_params.separation
             grid = HyperbolicGrid(
-                N_eta=grid_params.radial_points,      # 使用 radial_points 作為 eta 方向的點數
-                N_nu=grid_params.angular_points,      # 使用 angular_points 作為 nu 方向的點數
-                R=tip_params.radius,                  # 傳入針尖曲率半徑
-                Z_TS=separation                       # 傳入針尖-樣品距離
+                N_eta=grid_params.radial_points, 
+                N_nu=grid_params.angular_points,
+                R=tip_params.radius,
+                Z_TS=tip_params.separation
+                # r_max_factor can be added if it's in config.grid
             )
-            logger.info("雙曲面網格建立成功。")
+            logger.info(f"HyperbolicGrid created: Actual N_eta={grid.N_eta}, N_nu={grid.N_nu}, f={grid.f:.4f} nm, eta_tip={grid.eta_tip:.4f}")
             return grid
         except ValueError as e:
-            logger.error(f"建立網格失敗: {e}")
+            logger.error(f"Error creating HyperbolicGrid: {e}")
             raise
-
+        except Exception as e_gen:
+            logger.error(f"Unexpected error creating HyperbolicGrid: {e_gen}")
+            raise
+            
     def mix_potential(self, old_potential, new_potential):
-        """混合新舊電位以穩定收斂過程。"""
-        # Use default mixing parameter if not in config
-        alpha = getattr(getattr(self.config, 'convergence', None), 'mixing_alpha', 0.3)
+        # mixing_alpha might be part of config.computation
+        alpha = getattr(getattr(getattr(self.config, 'computation', None), 'mixing_alpha', None), 'value', 0.3)
+        # If computation.mixing_alpha is a direct float:
+        # alpha = self.config.computation.mixing_alpha if hasattr(self.config.computation, 'mixing_alpha') else 0.3
+        logger.debug(f"Mixing potential with alpha = {alpha}")
         return (1 - alpha) * old_potential + alpha * new_potential
 
     def run_self_consistent_loop(self):
-        """
-        執行核心的自洽迴圈。
-        """
-        logger.info("開始執行自洽迴圈...")
-        start_time = time.time()
-
-        # 從設定檔獲取參數
-        # Use computation.max_iterations if available, otherwise default
-        max_iterations = self.config.computation.max_iterations[0] if hasattr(self.config, 'computation') else 10000
-        tolerance = self.config.computation.convergence_parameters[0] if hasattr(self.config, 'computation') else 1e-3
-        V_tip = self.config.voltage_scan.start if hasattr(self.config, 'voltage_scan') else 0.0
-        V_sample = 0.0 # 假設樣品接地
-
-        # --- 1. 初始解：求解拉普拉斯方程式 ---
-        logger.info(f"正在求解初始電位 (拉普拉斯方程式) V_tip={V_tip}V...")
-        try:
-            # 【修改】呼叫新的 solve_laplace 方法
-            # Use default SOR parameters if not in config
-            omega = 1.5  # Default SOR relaxation parameter
-            sor_tolerance = 1e-6  # Default SOR tolerance
-            
-            potential, iters, err = self.poisson_solver.solve_laplace(
-                V_tip=V_tip, 
-                V_sample=V_sample,
-                omega=omega,
-                tolerance=sor_tolerance
-            )
-            logger.info(f"拉普拉斯方程式求解完成，耗時 {iters} 次迭代。")
-        except Exception as e:
-            logger.error(f"拉普拉斯方程式求解失敗: {e}")
-            raise
-
-        # --- 2. 自洽迴圈 ---
-        for i in range(max_iterations):
-            logger.info(f"--- 自洽迭代: {i + 1}/{max_iterations} ---")
-            
-            # a. 根據當前電位，計算半導體中的電荷密度
-            # 注意：charge_density 模組可能也需要適配雙曲面網格，但目前我們先假設其介面不變
-            rho = self.charge_density.calculate(potential)
-            
-            # b. 求解帕松方程式，得到新的電位分佈
-            # 【修改】呼叫新的 solve 方法，傳入電荷密度和當前電位作為初始猜測
-            new_potential, sor_iters, sor_err = self.poisson_solver.solve(
-                charge_density_rho=rho,
-                potential_guess=potential, # 使用上一次的結果作為初始猜測
-                omega=omega,
-                tolerance=sor_tolerance
-            )
-            logger.info(f"帕松方程式求解完成，耗時 {sor_iters} 次迭代，誤差 {sor_err:.2e}")
-
-            # c. 檢查收斂性
-            potential_diff = np.max(np.abs(new_potential - potential))
-            logger.info(f"電位最大變化量: {potential_diff:.4e} V")
-            if potential_diff < tolerance:
-                logger.info(f"自洽迴圈在第 {i + 1} 次迭代後收斂！")
-                self.results['potential'] = new_potential
-                self.results['converged'] = True
-                break
-
-            # d. 混合電位，準備下一次迭代
-            potential = self.mix_potential(potential, new_potential)
-        else:
-            # 如果 for 迴圈正常結束（未被 break）
-            logger.warning("自洽迴圈達到最大迭代次數，未收斂。")
-            self.results['potential'] = potential
-            self.results['converged'] = False
+        logger.info("Starting self-consistent loop...")
         
-        end_time = time.time()
-        logger.info(f"自洽計算結束，總耗時: {end_time - start_time:.2f} 秒。")
+        logger.info("--- Simulation Parameters ---")
+        logger.info(f"Config Version: {getattr(self.config, 'version', 'N/A')}")
+        logger.info(f"Simulation Type: {getattr(self.config, 'simulation_type', 'N/A')}")
+        
+        env_conf = getattr(self.config, 'environment', None)
+        if env_conf:
+            logger.info(f"Temperature: {getattr(env_conf, 'temperature', 'N/A')} K")
+        
+        tip_conf = getattr(self.config, 'tip', None)
+        if tip_conf:
+            logger.info(f"Tip Separation (Z_TS): {getattr(tip_conf, 'separation', 'N/A')} nm")
+            logger.info(f"Tip Radius (R): {getattr(tip_conf, 'radius', 'N/A')} nm")
+            logger.info(f"Tip Contact Potential: {getattr(tip_conf, 'contact_potential', 'N/A')} eV")
+            logger.info(f"Tip Fermi Energy (E_F_main): {getattr(tip_conf, 'fermi_energy', 'N/A')} eV")
+
+        grid_conf = getattr(self.config, 'grid', None)
+        if grid_conf and self.grid:
+            logger.info(f"Grid Config: N_eta (radial_points)={getattr(grid_conf, 'radial_points', 'N/A')}, N_nu (angular_points)={getattr(grid_conf, 'angular_points', 'N/A')}")
+            logger.info(f"Grid Actual: N_eta={self.grid.N_eta}, N_nu={self.grid.N_nu}, f={self.grid.f:.4f} nm, eta_tip={self.grid.eta_tip:.4f}")
+        
+        volt_scan_conf = getattr(self.config, 'voltage_scan', None)
+        if not volt_scan_conf:
+            logger.error("Voltage scan configuration (voltage_scan) not found in config. Aborting.")
+            return
+
+        logger.info(f"Voltage Scan Points: {getattr(volt_scan_conf, 'points', 1)}")
+        start_voltage = getattr(volt_scan_conf, 'start_voltage', 0.0)
+        end_voltage = getattr(volt_scan_conf, 'end_voltage', 0.0)
+        logger.info(f"Voltage Scan Start: {start_voltage} V, End: {end_voltage} V")
+        
+        # For now, run for the start_voltage only as a test
+        # Loop over voltages will be: np.linspace(start_voltage, end_voltage, volt_scan_conf.points)
+        voltage_points_to_scan = [start_voltage] 
+        logger.info(f"Processing for voltage points: {voltage_points_to_scan}")
+
+        for current_bias_V in voltage_points_to_scan:
+            logger.info(f"--- Processing Bias Voltage: {current_bias_V:.3f} V ---")
+            # Determine V_tip and V_sample for Poisson solver based on bias convention
+            # Assuming bias is applied to tip, sample is grounded: V_tip = V_bias, V_sample = 0
+            # Contact potential might adjust V_tip: V_tip_effective = V_bias - V_contact_potential
+            # For now, let's use a simple assumption:
+            V_tip_eff_Volts = current_bias_V - getattr(tip_conf, 'contact_potential', 0.0) if tip_conf else current_bias_V
+            V_sample_eff_Volts = 0.0 
+
+            logger.info(f"Effective Tip Potential (for Poisson): {V_tip_eff_Volts:.3f} V")
+            logger.info(f"Effective Sample Potential (for Poisson): {V_sample_eff_Volts:.3f} V")
+            logger.info("-----------------------------")
+
+            logger.info("Solving Laplace equation for initial potential distribution...")
+            if not self.grid.region_id_map_initialized: # Check if region_id_map is ready
+                 logger.error("Grid region_id_map not initialized. Cannot solve Laplace/Poisson. Call grid.set_material_regions first.")
+                 return # or raise error
+
+            initial_potential_Volts, laplace_iters, laplace_error = self.poisson_solver.solve_laplace(
+                V_tip_Volts=V_tip_eff_Volts, V_sample_Volts=V_sample_eff_Volts,
+                region_id_map=self.grid.region_id_map, # Pass the actual map
+                # Other args for solve_laplace if its signature demands (charge_calc, fermi_level are optional in poisson.py)
+            )
+            logger.info(f"Laplace solution: {laplace_iters} iterations, Max error: {laplace_error:.3e} V.")
+            
+            potential_Volts = initial_potential_Volts
+            
+            comp_conf = getattr(self.config, 'computation', None)
+            if not comp_conf:
+                logger.error("Computation settings (computation) not found in config. Using defaults.")
+                max_scf_iterations = 50
+                scf_tolerance = 1e-4
+                sor_max_iters = 2000
+                sor_tolerance = 1e-5
+                sor_omega = 1.8
+            else:
+                max_scf_iterations = comp_conf.max_iterations[0] if comp_conf.max_iterations else 50
+                scf_tolerance = comp_conf.convergence_parameters[0] if comp_conf.convergence_parameters else 1e-4
+                # Assuming SOR params might be different or taken from the same array for now
+                sor_max_iters = comp_conf.max_iterations[-1] if len(comp_conf.max_iterations) > 1 else max_scf_iterations 
+                sor_tolerance = comp_conf.convergence_parameters[-1] if len(comp_conf.convergence_parameters) > 1 else scf_tolerance
+                sor_omega = getattr(comp_conf, 'sor_omega', 1.8) # Assuming sor_omega can be a field
+
+            latest_rho_C_cm3 = np.zeros_like(potential_Volts) # Initialize charge
+
+            for scf_iter in range(max_scf_iterations):
+                logger.info(f"--- SCF Iteration: {scf_iter + 1} / {max_scf_iterations} (Bias: {current_bias_V:.3f}V) ---")
+                
+                logger.info("Calculating charge density rho(V)...")
+                try:
+                    new_rho_C_cm3 = self.charge_density_calculator.calculate_charge_density(
+                        potential_matrix_Volts=potential_Volts,
+                        region_id_map=self.grid.region_id_map
+                    )
+                    if new_rho_C_cm3 is None: # calculate_charge_density might not be fully implemented
+                        logger.error("Charge density calculation returned None. Aborting SCF.")
+                        return
+                    latest_rho_C_cm3 = new_rho_C_cm3 # Store for results
+                    # Log some stats about new_rho_C_cm3
+                    logger.debug(f"Rho stats: min={np.min(new_rho_C_cm3):.2e}, max={np.max(new_rho_C_cm3):.2e}, mean={np.mean(new_rho_C_cm3):.2e} C/cm^3")
+
+                except Exception as e:
+                    logger.error(f"Error during charge density calculation in SCF iter {scf_iter + 1}: {e}", exc_info=True)
+                    break # Exit SCF loop on error
+
+                logger.info("Solving Poisson equation V(rho)...")
+                try:
+                    new_potential_Volts, poisson_iters, poisson_error = self.poisson_solver.solve(
+                        charge_density_rho_initial_C_cm3=new_rho_C_cm3, 
+                        potential_guess_Volts=potential_Volts,
+                        charge_density_calculator=self.charge_density_calculator,
+                        region_id_map=self.grid.region_id_map,
+                        system_fermi_level_E_F_main_eV=getattr(tip_conf, 'fermi_energy', 0.0),
+                        V_tip_Volts=V_tip_eff_Volts,
+                        V_sample_Volts=V_sample_eff_Volts,
+                        omega=sor_omega, 
+                        tolerance=sor_tolerance,
+                        max_iterations=sor_max_iters
+                    )
+                    logger.info(f"Poisson solution: {poisson_iters} iterations, Max error: {poisson_error:.3e} V.")
+                except Exception as e:
+                    logger.error(f"Error during Poisson solution in SCF iter {scf_iter + 1}: {e}", exc_info=True)
+                    break # Exit SCF loop on error
+
+                potential_change_norm = np.linalg.norm(new_potential_Volts - potential_Volts)
+                potential_norm = np.linalg.norm(potential_Volts)
+                relative_change = potential_change_norm / (potential_norm + 1e-9) # Avoid division by zero
+                
+                logger.info(f"SCF Iteration {scf_iter + 1}: Potential change norm = {potential_change_norm:.3e}, Relative change = {relative_change:.3e}")
+
+                potential_Volts = self.mix_potential(potential_Volts, new_potential_Volts)
+
+                if relative_change < scf_tolerance:
+                    logger.info(f"Self-consistent loop converged in {scf_iter + 1} iterations for bias {current_bias_V:.3f}V.")
+                    break
+                if scf_iter == max_scf_iterations - 1:
+                    logger.warning(f"Self-consistent loop DID NOT converge after {max_scf_iterations} iterations for bias {current_bias_V:.3f}V. Final relative change: {relative_change:.3e}")
+            
+            self.results[current_bias_V] = {
+                'potential_Volts': potential_Volts,
+                'rho_C_cm3': latest_rho_C_cm3,
+                'scf_iterations': scf_iter + 1,
+                'final_potential_relative_change': relative_change if 'relative_change' in locals() else -1.0
+            }
+            logger.info(f"--- Finished processing Bias Voltage: {current_bias_V:.3f} V ---")
+        
+        logger.info("All voltage points processed. Self-consistent loop finished.")

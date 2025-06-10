@@ -472,7 +472,7 @@ class SchrodingerSolver:
         kappa = np.sqrt(2 * m_eff * PC.E * np.maximum(0, v_barrier - energy)) / self.hbar
         
         # Integrate
-        integral = np.trapz(kappa, z_barrier * 1e-9)  # Convert nm to m
+        integral = np.trapezoid(kappa, z_barrier * 1e-9)  # Convert nm to m
         
         # Transmission coefficient
         T = np.exp(-2 * integral)
