@@ -140,6 +140,10 @@ class TipGeometry:
         Returns:
             True if point is inside tip
         """
+        # Tip only exists in vacuum region (z <= 0)
+        if z > 0:
+            return False
+            
         # Convert to tip-centered coordinates
         # Account for tip position offsets
         x = r * np.cos(phi) - self.config.x_offset
@@ -151,12 +155,12 @@ class TipGeometry:
             # Below tip apex - inside spherical end
             if r_tip <= self.config.radius2:
                 tip_surface_height = self.tip_surface_function(r_tip)
-                return z_tip >= -tip_surface_height
+                return bool(z_tip >= -tip_surface_height)
                 
         elif z_tip > 0:
             # Above tip apex - check conical section
             tip_radius_at_z = self.config.radius2 + z_tip * self.config.slope
-            return r_tip <= tip_radius_at_z
+            return bool(r_tip <= tip_radius_at_z)
             
         return False
         

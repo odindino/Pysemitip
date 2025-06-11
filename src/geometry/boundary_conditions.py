@@ -299,6 +299,7 @@ class BoundaryConditions:
         
         if self.config.tip_boundary_type == BoundaryType.DIRICHLET:
             # Fixed potential on tip surface
+            # Both tip_mask and tip_values are (nr, nv, np)
             vacuum_potential[tip_mask] = tip_values[tip_mask]
             
         elif self.config.tip_boundary_type == BoundaryType.NEUMANN:
