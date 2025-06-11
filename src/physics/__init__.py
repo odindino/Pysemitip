@@ -1,1 +1,0 @@
-"""Physics simulation modules for SEMITIP."""
