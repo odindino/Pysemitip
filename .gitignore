@@ -9,3 +9,4 @@ logs/
 *.log
 claude.md
 .pytest_cache/
+*handoff.md
