@@ -452,13 +452,51 @@ class MultInt:
                 if scf_iter == max_scf_iterations - 1:
                     logger.warning(f"Self-consistent loop DID NOT converge after {max_scf_iterations} iterations for bias {current_bias_V:.3f}V. Final relative change: {relative_change:.3e}")
             
+            # 計算最終的VSINT Pot0值並顯示
+            try:
+                # 使用完整的VSINT+縮放修正計算最終Pot0
+                vsint_array = self.poisson_solver._initialize_vsint_array()
+                vsint_array = self.poisson_solver._update_vsint_with_surface_charge(
+                    vsint_array, potential_Volts, self.charge_density_calculator,
+                    getattr(tip_conf, 'fermi_energy', 1.4187), V_tip_eff_Volts)
+                
+                final_pot0_vsint_scaled = self.poisson_solver._calculate_pot0_fortran_style(
+                    potential_Volts, use_vsint=True, vsint_array=vsint_array, apply_scaling_correction=True)
+                final_pot0_regular_scaled = self.poisson_solver._calculate_pot0_fortran_style(
+                    potential_Volts, use_vsint=False, apply_scaling_correction=True)
+                
+                logger.info(f"")
+                logger.info(f"🎯 FINAL POT0 RESULTS for {current_bias_V:.3f}V:")
+                logger.info(f"   Regular Pot0 (scaled):  {final_pot0_regular_scaled:14.8E} V")
+                logger.info(f"   VSINT Pot0 (scaled):    {final_pot0_vsint_scaled:14.8E} V")
+                logger.info(f"   Difference from Fortran (-0.08V): {abs(final_pot0_vsint_scaled - (-0.08)):.6f} V")
+                if abs(final_pot0_vsint_scaled - (-0.08)) < 0.01:
+                    logger.info(f"   ✅ EXCELLENT AGREEMENT with Fortran!")
+                elif abs(final_pot0_vsint_scaled - (-0.08)) < 0.05:
+                    logger.info(f"   ✅ Good agreement with Fortran")
+                else:
+                    logger.info(f"   ⚠️  Large deviation from Fortran")
+                logger.info(f"")
+                
+                # 將最終Pot0添加到結果中
+                final_pot0_results = {
+                    'pot0_regular_scaled': final_pot0_regular_scaled,
+                    'pot0_vsint_scaled': final_pot0_vsint_scaled,
+                    'pot0_fortran_difference': abs(final_pot0_vsint_scaled - (-0.08))
+                }
+                
+            except Exception as e:
+                logger.warning(f"Error calculating final VSINT Pot0: {e}")
+                final_pot0_results = {}
+
             self.results[current_bias_V] = {
                 'potential_Volts': potential_Volts,
                 'rho_C_cm3': latest_rho_C_cm3,
                 'scf_iterations': scf_iter + 1,
                 'final_potential_relative_change': relative_change if 'relative_change' in locals() else -1.0,
                 'adjusted_bias_V': adjusted_bias,  # Store the adjusted bias for reference
-                'tip_potential_V': V_tip_eff_Volts
+                'tip_potential_V': V_tip_eff_Volts,
+                'final_pot0': final_pot0_results  # 添加最終Pot0結果
             }
             logger.info(f"--- Finished processing Bias Voltage: {current_bias_V:.3f} V (adjusted: {adjusted_bias:.7f} V) ---")
         
